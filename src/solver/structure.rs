@@ -10,6 +10,64 @@ pub struct BuildingMesh {
     pub color: [f32; 3],
 }
 
+const EDGE_THICKNESS: f32 = 0.025;
+const EDGE_COLOR: [f32; 3] = [0.08, 0.08, 0.08];
+
+/// Generate black edge strips for a box with given dimensions at the given transform.
+fn edge_strips_for_box(w: f32, h: f32, d: f32, model: Matrix4<f32>) -> Vec<BuildingMesh> {
+    let hw = w / 2.0;
+    let hh = h / 2.0;
+    let hd = d / 2.0;
+    let t = EDGE_THICKNESS;
+    let mut edges = Vec::new();
+
+    // 4 edges along X (width): at each corner of the YZ face
+    for &dy in &[-hd, hd] {
+        for &dz in &[-hh, hh] {
+            edges.push(BuildingMesh {
+                mesh: MeshData::box_mesh(w + t, t, t),
+                model_matrix: model * Matrix4::new_translation(&Vector3::new(0.0, dy, dz)),
+                color: EDGE_COLOR,
+            });
+        }
+    }
+    // 4 edges along Y (depth): at each corner of the XZ face
+    for &dx in &[-hw, hw] {
+        for &dz in &[-hh, hh] {
+            edges.push(BuildingMesh {
+                mesh: MeshData::box_mesh(t, d + t, t),
+                model_matrix: model * Matrix4::new_translation(&Vector3::new(dx, 0.0, dz)),
+                color: EDGE_COLOR,
+            });
+        }
+    }
+    // 4 edges along Z (height): at each corner of the XY face
+    for &dx in &[-hw, hw] {
+        for &dy in &[-hd, hd] {
+            edges.push(BuildingMesh {
+                mesh: MeshData::box_mesh(t, t, h + t),
+                model_matrix: model * Matrix4::new_translation(&Vector3::new(dx, dy, 0.0)),
+                color: EDGE_COLOR,
+            });
+        }
+    }
+    edges
+}
+
+/// Helper: create a box BuildingMesh and its edge wireframe.
+fn box_with_edges(w: f32, h: f32, d: f32, model: Matrix4<f32>, color: [f32; 3]) -> Vec<BuildingMesh> {
+    let mut out = vec![BuildingMesh {
+        mesh: MeshData::box_mesh(w, d, h), // box_mesh params are (width, depth, height) with Z-up
+        model_matrix: model,
+        color,
+    }];
+    // Note: box_mesh(w, d, h) — the internal layout is width=X, depth=Y, height=Z
+    // edge_strips_for_box expects (w, h, d) where h=Z-height, d=Y-depth
+    // matching the semantic meaning, not the box_mesh parameter order
+    out.extend(edge_strips_for_box(w, h, d, model));
+    out
+}
+
 /// Generate all 3D geometry from a solved building.
 /// All geometry is non-overlapping: walls, slabs, and rooms occupy exclusive volumes.
 pub fn generate_building_meshes(building: &SolvedBuilding) -> Vec<BuildingMesh> {
@@ -30,17 +88,16 @@ pub fn generate_building_meshes(building: &SolvedBuilding) -> Vec<BuildingMesh> 
         // --- Floor slab: inset by exterior wall thickness so it doesn't overlap walls ---
         let slab_w = fw - 2.0 * ext;
         let slab_d = fd - 2.0 * ext;
-        meshes.push(BuildingMesh {
-            mesh: MeshData::box_mesh(slab_w, slab_d, slab_t),
-            model_matrix: Matrix4::new_translation(&Vector3::new(
+        meshes.extend(box_with_edges(slab_w, slab_t, slab_d,
+            Matrix4::new_translation(&Vector3::new(
                 offset.x + fw / 2.0,
                 offset.y + fd / 2.0,
                 z0 - slab_t / 2.0,
             )),
-            color: building.style.floor_color,
-        });
+            building.style.floor_color,
+        ));
 
-        // --- Room ground planes (colored per room type) ---
+        // --- Room ground planes (colored per room type, no edges — too thin) ---
         for room in &floor.rooms {
             let w = room.width as f32 - 0.02;
             let d = room.depth as f32 - 0.02;
@@ -56,49 +113,42 @@ pub fn generate_building_meshes(building: &SolvedBuilding) -> Vec<BuildingMesh> 
         }
 
         // --- Exterior walls: 4 panels that meet at corners without overlap ---
-        // Each wall is a solid box. South/North walls span the full width.
-        // East/West walls fit between the South and North walls (shorter by 2*ext).
-
-        // South wall (full width, at y=ext/2)
-        meshes.push(BuildingMesh {
-            mesh: MeshData::box_mesh(fw, ext, ch),
-            model_matrix: Matrix4::new_translation(&Vector3::new(
+        // South wall (full width)
+        meshes.extend(box_with_edges(fw, ch, ext,
+            Matrix4::new_translation(&Vector3::new(
                 offset.x + fw / 2.0,
                 offset.y + ext / 2.0,
                 z0 + ch / 2.0,
             )),
-            color: building.style.exterior_color,
-        });
-        // North wall (full width, at y=fd-ext/2)
-        meshes.push(BuildingMesh {
-            mesh: MeshData::box_mesh(fw, ext, ch),
-            model_matrix: Matrix4::new_translation(&Vector3::new(
+            building.style.exterior_color,
+        ));
+        // North wall (full width)
+        meshes.extend(box_with_edges(fw, ch, ext,
+            Matrix4::new_translation(&Vector3::new(
                 offset.x + fw / 2.0,
                 offset.y + fd - ext / 2.0,
                 z0 + ch / 2.0,
             )),
-            color: building.style.exterior_color,
-        });
-        // West wall (fits between S and N walls)
-        meshes.push(BuildingMesh {
-            mesh: MeshData::box_mesh(ext, fd - 2.0 * ext, ch),
-            model_matrix: Matrix4::new_translation(&Vector3::new(
+            building.style.exterior_color,
+        ));
+        // West wall (fits between S and N)
+        meshes.extend(box_with_edges(ext, ch, fd - 2.0 * ext,
+            Matrix4::new_translation(&Vector3::new(
                 offset.x + ext / 2.0,
                 offset.y + fd / 2.0,
                 z0 + ch / 2.0,
             )),
-            color: building.style.exterior_color,
-        });
-        // East wall (fits between S and N walls)
-        meshes.push(BuildingMesh {
-            mesh: MeshData::box_mesh(ext, fd - 2.0 * ext, ch),
-            model_matrix: Matrix4::new_translation(&Vector3::new(
+            building.style.exterior_color,
+        ));
+        // East wall (fits between S and N)
+        meshes.extend(box_with_edges(ext, ch, fd - 2.0 * ext,
+            Matrix4::new_translation(&Vector3::new(
                 offset.x + fw - ext / 2.0,
                 offset.y + fd / 2.0,
                 z0 + ch / 2.0,
             )),
-            color: building.style.exterior_color,
-        });
+            building.style.exterior_color,
+        ));
 
         // --- Interior walls: deduplicated, clipped to interior zone ---
         let interior_walls = collect_interior_walls(floor, building);
@@ -115,15 +165,14 @@ pub fn generate_building_meshes(building: &SolvedBuilding) -> Vec<BuildingMesh> 
                 (int, length) // vertical
             };
 
-            meshes.push(BuildingMesh {
-                mesh: MeshData::box_mesh(w, d, ch),
-                model_matrix: Matrix4::new_translation(&Vector3::new(
+            meshes.extend(box_with_edges(w, ch, d,
+                Matrix4::new_translation(&Vector3::new(
                     offset.x + cx,
                     offset.y + cy,
                     z0 + ch / 2.0,
                 )),
-                color: building.style.interior_wall_color,
-            });
+                building.style.interior_wall_color,
+            ));
         }
     }
 
