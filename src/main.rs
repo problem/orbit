@@ -24,50 +24,83 @@ fn main() {
     event_loop.run_app(&mut app).expect("Event loop failed");
 }
 
-/// Create a test .orb file, write a cube, read it back.
+/// Create a test .orb file, write a cube with spatial data, read it all back.
 fn validate_orb_pipeline() {
     use orbit::orb::{mesh::MeshData, read::OrbReader, types::*, write::OrbWriter};
+    use orbit::spatial::aabb::Aabb;
+    use orbit::spatial::clash::ClashResult;
+    use orbit::spatial::occupancy::{ClearanceEnvelope, OccupancyRecord};
 
     let path = std::env::temp_dir().join("orbit_test.orb");
     log::info!("Creating test .orb file at {:?}", path);
 
     // Write
     let writer = OrbWriter::create(&path).expect("Failed to create .orb");
-    let mut entity = Entity::new(EntityType::Body);
-    entity.name = Some("Test Cube".to_string());
-    let entity_id = entity.id;
-    writer.insert_entity(&entity).expect("Failed to insert entity");
+    writer.begin_transaction().expect("Failed to begin tx");
+
+    let mut wall = Entity::new(EntityType::Body);
+    wall.name = Some("Test Wall".to_string());
+    let wall_id = wall.id;
+    writer.insert_entity(&wall).expect("Failed to insert wall");
+
+    let mut duct = Entity::new(EntityType::Body);
+    duct.name = Some("Test Duct".to_string());
+    let duct_id = duct.id;
+    writer.insert_entity(&duct).expect("Failed to insert duct");
 
     let cube = MeshData::cube(1.0);
-    writer
-        .insert_mesh(&entity_id, &cube)
-        .expect("Failed to insert mesh");
+    writer.insert_mesh(&wall_id, &cube).expect("Failed to insert mesh");
+    writer.insert_mesh(&duct_id, &cube).expect("Failed to insert mesh");
 
     let mat = Material::new("Default", "6B8EAD");
     writer.insert_material(&mat).expect("Failed to insert material");
+
+    // Spatial index
+    let wall_aabb = Aabb::from_positions(&cube.positions).unwrap();
+    writer.upsert_spatial_entry(&wall_id, &wall_aabb).expect("Failed to insert spatial");
+    writer.upsert_spatial_entry(&duct_id, &wall_aabb).expect("Failed to insert spatial");
+
+    // Occupancy with clearance envelope
+    let wall_occ = OccupancyRecord::penetrable(wall_id, BuildingSystem::Architectural)
+        .with_clearance(ClearanceEnvelope::AaBox {
+            min: [-600.0, -100.0, 0.0],
+            max: [600.0, 100.0, 2400.0],
+        });
+    writer.insert_occupancy(&wall_occ).expect("Failed to insert occupancy");
+
+    let duct_occ = OccupancyRecord::solid(duct_id, BuildingSystem::Mechanical);
+    writer.insert_occupancy(&duct_occ).expect("Failed to insert occupancy");
+
+    // Clash result
+    let clash = ClashResult::new_hard(wall_id, duct_id);
+    writer.insert_clash_result(&clash).expect("Failed to insert clash");
+
+    writer.commit().expect("Failed to commit tx");
     writer.finalize().expect("Failed to finalize .orb");
 
     // Read
     let reader = OrbReader::open(&path).expect("Failed to open .orb");
     let meta = reader.read_meta().expect("Failed to read meta");
     log::info!("  format_version: {}", meta.get("format_version").unwrap());
-    log::info!("  created_by: {}", meta.get("created_by").unwrap());
+    log::info!("  entities: {}", reader.entity_count().unwrap());
 
-    let entities = reader.read_entities().expect("Failed to read entities");
-    log::info!("  entities: {}", entities.len());
+    // Spatial index query
+    let hits = reader.query_spatial_index(&wall_aabb).expect("Failed to query spatial");
+    log::info!("  spatial index hits for wall AABB: {}", hits.len());
 
-    let mesh = reader
-        .read_mesh(&entity_id)
-        .expect("Failed to read mesh")
-        .expect("Mesh not found");
+    // Occupancy round-trip
+    let occ = reader.read_occupancy(&wall_id).expect("Failed to read occupancy").unwrap();
     log::info!(
-        "  mesh: {} vertices, {} triangles",
-        mesh.vertex_count(),
-        mesh.triangle_count()
+        "  wall occupancy: type={}, system={:?}, clearances={}, priority={}",
+        occ.occupancy_type, occ.system, occ.clearance_envelopes.len(), occ.priority
     );
 
+    // Clash round-trip
+    let clashes = reader.read_active_clashes().expect("Failed to read clashes");
+    log::info!("  active clashes: {}", clashes.len());
+
     let _ = std::fs::remove_file(&path);
-    log::info!("Orb file I/O pipeline validated successfully");
+    log::info!("Orb file I/O pipeline validated successfully (with spatial integrity)");
 }
 
 /// Parse a canonical OIL example.

@@ -7,6 +7,9 @@ use super::mesh::MeshData;
 use super::schema::{self, ORB_FORMAT_VERSION};
 use super::types::{Entity, Layer, Material};
 use super::uuid::OrbId;
+use crate::spatial::aabb::Aabb;
+use crate::spatial::clash::ClashResult;
+use crate::spatial::occupancy::OccupancyRecord;
 
 /// Writer for creating and populating .orb files.
 pub struct OrbWriter {
@@ -120,6 +123,119 @@ impl OrbWriter {
                 layer.locked as i32,
                 layer.sort_order,
             ],
+        )?;
+        Ok(())
+    }
+
+    // --- Spatial Index ---
+
+    /// Insert or update the spatial index entry for an entity.
+    /// Uses the orb_entity_rowids bridge table to map UUIDv7 → integer rowid.
+    pub fn upsert_spatial_entry(&self, entity_id: &OrbId, aabb: &Aabb) -> Result<()> {
+        // Get or create the rowid mapping
+        self.conn.execute(
+            "INSERT OR IGNORE INTO orb_entity_rowids (entity_id) VALUES (?1)",
+            rusqlite::params![entity_id],
+        )?;
+        let rowid: i64 = self.conn.query_row(
+            "SELECT rowid FROM orb_entity_rowids WHERE entity_id = ?1",
+            rusqlite::params![entity_id],
+            |row| row.get(0),
+        )?;
+        // Upsert into the R-tree
+        self.conn.execute(
+            "INSERT OR REPLACE INTO orb_spatial_index (id, min_x, max_x, min_y, max_y, min_z, max_z)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                rowid,
+                aabb.min.x,
+                aabb.max.x,
+                aabb.min.y,
+                aabb.max.y,
+                aabb.min.z,
+                aabb.max.z,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Remove the spatial index entry for an entity.
+    pub fn delete_spatial_entry(&self, entity_id: &OrbId) -> Result<()> {
+        let result: rusqlite::Result<i64> = self.conn.query_row(
+            "SELECT rowid FROM orb_entity_rowids WHERE entity_id = ?1",
+            rusqlite::params![entity_id],
+            |row| row.get(0),
+        );
+        if let Ok(rowid) = result {
+            self.conn.execute(
+                "DELETE FROM orb_spatial_index WHERE id = ?1",
+                rusqlite::params![rowid],
+            )?;
+            self.conn.execute(
+                "DELETE FROM orb_entity_rowids WHERE entity_id = ?1",
+                rusqlite::params![entity_id],
+            )?;
+        }
+        Ok(())
+    }
+
+    // --- Occupancy ---
+
+    pub fn insert_occupancy(&self, record: &OccupancyRecord) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO orb_occupancy (entity_id, occupancy_type, clearance_data, priority, system)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                record.entity_id,
+                record.occupancy_type.to_string(),
+                record.clearance_blob(),
+                record.priority,
+                record.system.map(|s| s.to_string()),
+            ],
+        )?;
+        Ok(())
+    }
+
+    // --- Clash Results ---
+
+    pub fn insert_clash_result(&self, clash: &ClashResult) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO orb_clash_results
+             (id, entity_a, entity_b, clash_type, severity, system_a, system_b,
+              intersection_point_x, intersection_point_y, intersection_point_z,
+              distance, status, resolved_by, detected_at, resolved_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            rusqlite::params![
+                clash.id,
+                clash.entity_a,
+                clash.entity_b,
+                clash.clash_type.to_string(),
+                clash.severity.to_string(),
+                clash.system_a,
+                clash.system_b,
+                clash.intersection_point.map(|p| p[0]),
+                clash.intersection_point.map(|p| p[1]),
+                clash.intersection_point.map(|p| p[2]),
+                clash.distance,
+                clash.status.to_string(),
+                clash.resolved_by,
+                clash.detected_at,
+                clash.resolved_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_clash_status(
+        &self,
+        clash_id: &OrbId,
+        status: &str,
+        resolved_by: Option<&str>,
+    ) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE orb_clash_results SET status = ?1, resolved_by = ?2, resolved_at = ?3 WHERE id = ?4",
+            rusqlite::params![status, resolved_by, now, clash_id],
         )?;
         Ok(())
     }

@@ -208,6 +208,18 @@ impl fmt::Display for ClashType {
     }
 }
 
+impl FromStr for ClashType {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "hard" => Ok(Self::Hard),
+            "clearance" => Ok(Self::Clearance),
+            "penetration" => Ok(Self::Penetration),
+            _ => Err(format!("unknown clash type: {s}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ClashSeverity {
@@ -226,6 +238,18 @@ impl fmt::Display for ClashSeverity {
     }
 }
 
+impl FromStr for ClashSeverity {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "error" => Ok(Self::Error),
+            "warning" => Ok(Self::Warning),
+            "info" => Ok(Self::Info),
+            _ => Err(format!("unknown clash severity: {s}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ClashStatus {
@@ -233,6 +257,19 @@ pub enum ClashStatus {
     Resolved,
     Approved,
     Ignored,
+}
+
+impl FromStr for ClashStatus {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "active" => Ok(Self::Active),
+            "resolved" => Ok(Self::Resolved),
+            "approved" => Ok(Self::Approved),
+            "ignored" => Ok(Self::Ignored),
+            _ => Err(format!("unknown clash status: {s}")),
+        }
+    }
 }
 
 impl fmt::Display for ClashStatus {

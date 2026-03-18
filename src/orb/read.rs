@@ -7,8 +7,11 @@ use rusqlite::Connection;
 use super::mesh::MeshData;
 use super::schema;
 use super::transform::Transform;
-use super::types::{Entity, EntityType, Layer, Material};
+use super::types::*;
 use super::uuid::OrbId;
+use crate::spatial::aabb::Aabb;
+use crate::spatial::clash::ClashResult;
+use crate::spatial::occupancy::{clearance_from_blob, OccupancyRecord};
 
 /// Reader for .orb files.
 pub struct OrbReader {
@@ -173,5 +176,147 @@ impl OrbReader {
             .conn
             .query_row("SELECT COUNT(*) FROM orb_entities", [], |row| row.get(0))?;
         Ok(count as usize)
+    }
+
+    // --- Spatial Index ---
+
+    /// Query the SQLite R-tree for entities whose AABB intersects the given box.
+    /// Returns entity IDs (resolved through orb_entity_rowids bridge table).
+    pub fn query_spatial_index(&self, aabb: &Aabb) -> Result<Vec<OrbId>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT r.entity_id FROM orb_entity_rowids r
+             JOIN orb_spatial_index s ON s.id = r.rowid
+             WHERE s.max_x >= ?1 AND s.min_x <= ?2
+               AND s.max_y >= ?3 AND s.min_y <= ?4
+               AND s.max_z >= ?5 AND s.min_z <= ?6",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![
+                aabb.min.x, aabb.max.x,
+                aabb.min.y, aabb.max.y,
+                aabb.min.z, aabb.max.z,
+            ],
+            |row| row.get(0),
+        )?;
+        let mut ids = Vec::new();
+        for row in rows {
+            ids.push(row?);
+        }
+        Ok(ids)
+    }
+
+    /// Read the AABB for an entity from the spatial index.
+    pub fn read_entity_aabb(&self, entity_id: &OrbId) -> Result<Option<Aabb>> {
+        let result = self.conn.query_row(
+            "SELECT s.min_x, s.max_x, s.min_y, s.max_y, s.min_z, s.max_z
+             FROM orb_spatial_index s
+             JOIN orb_entity_rowids r ON r.rowid = s.id
+             WHERE r.entity_id = ?1",
+            rusqlite::params![entity_id],
+            |row| {
+                Ok(Aabb::new(
+                    nalgebra::Point3::new(row.get(0)?, row.get(2)?, row.get(4)?),
+                    nalgebra::Point3::new(row.get(1)?, row.get(3)?, row.get(5)?),
+                ))
+            },
+        );
+        match result {
+            Ok(aabb) => Ok(Some(aabb)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    // --- Occupancy ---
+
+    pub fn read_occupancy(&self, entity_id: &OrbId) -> Result<Option<OccupancyRecord>> {
+        let result = self.conn.query_row(
+            "SELECT occupancy_type, clearance_data, priority, system FROM orb_occupancy WHERE entity_id = ?1",
+            rusqlite::params![entity_id],
+            |row| {
+                let occ_type_str: String = row.get(0)?;
+                let clearance_blob: Option<Vec<u8>> = row.get(1)?;
+                let priority: i32 = row.get(2)?;
+                let system_str: Option<String> = row.get(3)?;
+                Ok((occ_type_str, clearance_blob, priority, system_str))
+            },
+        );
+        match result {
+            Ok((occ_type_str, clearance_blob, priority, system_str)) => {
+                let occupancy_type = occ_type_str
+                    .parse::<OccupancyType>()
+                    .unwrap_or(OccupancyType::Solid);
+                let clearance_envelopes = match clearance_blob {
+                    Some(blob) => clearance_from_blob(&blob)?,
+                    None => Vec::new(),
+                };
+                let system = system_str.and_then(|s| s.parse::<BuildingSystem>().ok());
+                Ok(Some(OccupancyRecord {
+                    entity_id: *entity_id,
+                    occupancy_type,
+                    clearance_envelopes,
+                    priority,
+                    system,
+                }))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    // --- Clash Results ---
+
+    pub fn read_active_clashes(&self) -> Result<Vec<ClashResult>> {
+        self.query_clashes("SELECT id, entity_a, entity_b, clash_type, severity, system_a, system_b, intersection_point_x, intersection_point_y, intersection_point_z, distance, status, resolved_by, detected_at, resolved_at FROM orb_clash_results WHERE status = 'active'")
+    }
+
+    pub fn read_clashes_for_entity(&self, entity_id: &OrbId) -> Result<Vec<ClashResult>> {
+        let mut results = Vec::new();
+        let mut stmt = self.conn.prepare(
+            "SELECT id, entity_a, entity_b, clash_type, severity, system_a, system_b, intersection_point_x, intersection_point_y, intersection_point_z, distance, status, resolved_by, detected_at, resolved_at FROM orb_clash_results WHERE entity_a = ?1 OR entity_b = ?1",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![entity_id], Self::map_clash_row)?;
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    fn query_clashes(&self, sql: &str) -> Result<Vec<ClashResult>> {
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = stmt.query_map([], Self::map_clash_row)?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    fn map_clash_row(row: &rusqlite::Row) -> rusqlite::Result<ClashResult> {
+        let px: Option<f64> = row.get(7)?;
+        let py: Option<f64> = row.get(8)?;
+        let pz: Option<f64> = row.get(9)?;
+        let intersection_point = match (px, py, pz) {
+            (Some(x), Some(y), Some(z)) => Some([x, y, z]),
+            _ => None,
+        };
+        let clash_type_str: String = row.get(3)?;
+        let severity_str: String = row.get(4)?;
+        let status_str: String = row.get(11)?;
+        Ok(ClashResult {
+            id: row.get(0)?,
+            entity_a: row.get(1)?,
+            entity_b: row.get(2)?,
+            clash_type: clash_type_str.parse().unwrap_or(ClashType::Hard),
+            severity: severity_str.parse().unwrap_or(ClashSeverity::Error),
+            system_a: row.get(5)?,
+            system_b: row.get(6)?,
+            intersection_point,
+            distance: row.get(10)?,
+            status: status_str.parse().unwrap_or(ClashStatus::Active),
+            resolved_by: row.get(12)?,
+            detected_at: row.get(13)?,
+            resolved_at: row.get(14)?,
+        })
     }
 }
