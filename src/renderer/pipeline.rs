@@ -62,6 +62,16 @@ pub fn create_wireframe_pipeline(
     create_pipeline_with_mode(device, format, bind_group_layout, wgpu::PolygonMode::Line)
 }
 
+/// Uniform buffer with black color for wireframe overlay pass.
+pub fn black_uniforms(view_proj: [[f32; 4]; 4], model: [[f32; 4]; 4], normal_matrix: [[f32; 4]; 4]) -> Uniforms {
+    Uniforms {
+        view_proj,
+        model,
+        normal_matrix,
+        base_color: [0.0, 0.0, 0.0, 1.0],
+    }
+}
+
 fn create_pipeline_with_mode(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
@@ -109,10 +119,22 @@ fn create_pipeline_with_mode(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: wgpu::TextureFormat::Depth32Float,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::Less,
+            depth_write_enabled: polygon_mode == wgpu::PolygonMode::Fill,
+            depth_compare: if polygon_mode == wgpu::PolygonMode::Line {
+                wgpu::CompareFunction::LessEqual // wireframe draws on top of solid
+            } else {
+                wgpu::CompareFunction::Less
+            },
             stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
+            bias: if polygon_mode == wgpu::PolygonMode::Line {
+                wgpu::DepthBiasState {
+                    constant: -2, // push wireframe slightly toward camera
+                    slope_scale: -2.0,
+                    clamp: 0.0,
+                }
+            } else {
+                wgpu::DepthBiasState::default()
+            },
         }),
         multisample: wgpu::MultisampleState {
             count: 1,

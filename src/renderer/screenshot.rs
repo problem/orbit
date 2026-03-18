@@ -160,7 +160,7 @@ fn render_building_to_png_opts(
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
             contents: bytemuck::cast_slice(&[uniforms]),
-            usage: wgpu::BufferUsages::UNIFORM,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
@@ -211,7 +211,6 @@ fn render_building_to_png_opts(
         });
 
         render_pass.set_pipeline(&render_pipeline);
-
         for d in &drawables {
             render_pass.set_bind_group(0, &d.bind_group, &[]);
             render_pass.set_vertex_buffer(0, d.gpu_mesh.vertex_buffer.slice(..));

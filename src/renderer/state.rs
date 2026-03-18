@@ -122,8 +122,7 @@ impl RenderState {
         self.camera_controller.update_camera(&mut self.camera);
         let view_proj = self.camera.view_projection_matrix();
 
-        // Upload all uniform data BEFORE starting the render pass.
-        // Each drawable has its own buffer, so no per-draw CPU→GPU stall.
+        // Upload uniforms with normal colors
         for drawable in &scene.drawables {
             let normal_mat = drawable.normal_matrix();
             let uniforms = Uniforms {
@@ -182,14 +181,8 @@ impl RenderState {
                 ..Default::default()
             });
 
-            let active_pipeline = if self.wireframe_mode {
-                &self.wireframe_pipeline
-            } else {
-                &self.render_pipeline
-            };
-            render_pass.set_pipeline(active_pipeline);
-
-            // Draw each object — only bind group switch, no buffer writes during the pass
+            // Pass 1: solid fill (always)
+            render_pass.set_pipeline(&self.render_pipeline);
             for drawable in &scene.drawables {
                 render_pass.set_bind_group(0, &drawable.bind_group, &[]);
                 render_pass.set_vertex_buffer(0, drawable.gpu_mesh.vertex_buffer.slice(..));
@@ -198,6 +191,32 @@ impl RenderState {
                     wgpu::IndexFormat::Uint32,
                 );
                 render_pass.draw_indexed(0..drawable.gpu_mesh.num_indices, 0, 0..1);
+            }
+
+            // Pass 2: black wireframe overlay (when E is toggled)
+            if self.wireframe_mode {
+                render_pass.set_pipeline(&self.wireframe_pipeline);
+                // Overwrite uniforms with black color for wireframe pass
+                for drawable in &scene.drawables {
+                    let normal_mat = drawable.normal_matrix();
+                    let black = pipeline::black_uniforms(
+                        view_proj.into(),
+                        drawable.model_matrix.into(),
+                        normal_mat.into(),
+                    );
+                    self.queue.write_buffer(
+                        &drawable.uniform_buffer,
+                        0,
+                        bytemuck::cast_slice(&[black]),
+                    );
+                    render_pass.set_bind_group(0, &drawable.bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, drawable.gpu_mesh.vertex_buffer.slice(..));
+                    render_pass.set_index_buffer(
+                        drawable.gpu_mesh.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    render_pass.draw_indexed(0..drawable.gpu_mesh.num_indices, 0, 0..1);
+                }
             }
         }
 
