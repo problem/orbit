@@ -231,8 +231,8 @@ impl RenderState {
                     // Wireframe overlay — reuse same uniforms (no buffer overwrite).
                     // Depth bias makes lines draw on top. Edges visible from lighting
                     // difference between wireframe (re-interpolated) and solid fill.
-                    let px = 6.0 / self.config.width as f32;
-                    let py = 6.0 / self.config.height as f32;
+                    let px = 15.0 / self.config.width as f32;
+                    let py = 15.0 / self.config.height as f32;
                     let offsets: [[f32; 2]; 9] = [
                         [0.0, 0.0],
                         [px, 0.0], [-px, 0.0], [0.0, py], [0.0, -py],
