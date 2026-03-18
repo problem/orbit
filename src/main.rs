@@ -63,12 +63,10 @@ fn kill_previous_orbit() {
     }
 }
 
-/// Find the next sequential screenshot path: screenshots/NNN_YYYY-MM-DD.png
-fn next_screenshot_path() -> std::path::PathBuf {
+/// Find the next sequential screenshot number.
+fn next_screenshot_num() -> u32 {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("screenshots");
     let _ = std::fs::create_dir_all(&dir);
-
-    // Find highest existing number
     let mut max_num = 0u32;
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
@@ -81,10 +79,7 @@ fn next_screenshot_path() -> std::path::PathBuf {
             }
         }
     }
-
-    let next = max_num + 1;
-    let date = chrono::Local::now().format("%Y-%m-%d");
-    dir.join(format!("{:03}_{}.png", next, date))
+    max_num + 1
 }
 
 // --- winit Application ---
@@ -147,16 +142,29 @@ impl ApplicationHandler for App {
         render_state.camera.target = nalgebra::Point3::new(0.0, 0.0, total_height as f32 / 2.0);
         render_state.camera_controller.update_camera(&mut render_state.camera);
 
-        // Export screenshot for QA — sequentially numbered in repo
-        let screenshot_path = next_screenshot_path();
-        if let Err(e) = orbit::renderer::screenshot::render_building_to_png(
-            &building,
-            &render_state.camera,
-            1920,
-            1080,
-            &screenshot_path,
-        ) {
-            log::warn!("Screenshot export failed: {}", e);
+        // Export 3 screenshots from different angles for QA
+        let base_num = next_screenshot_num();
+        let views: &[(&str, f32, f32)] = &[
+            ("front",  1.15, 0.40),  // 3/4 front-side view
+            ("gable",  0.15, 0.35),  // gable end view
+            ("above",  0.80, 1.05),  // elevated near-top-down
+        ];
+        for (i, (label, yaw, pitch)) in views.iter().enumerate() {
+            let mut cam = render_state.camera.clone();
+            let mut ctrl = CameraController::for_building(diag);
+            ctrl.yaw = *yaw;
+            ctrl.pitch = *pitch;
+            ctrl.update_camera(&mut cam);
+            let num = base_num + i as u32;
+            let date = chrono::Local::now().format("%Y-%m-%d");
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("screenshots")
+                .join(format!("{:03}_{}_{}.png", num, date, label));
+            if let Err(e) = orbit::renderer::screenshot::render_building_to_png(
+                &building, &cam, 1920, 1080, &path,
+            ) {
+                log::warn!("Screenshot {} failed: {}", label, e);
+            }
         }
 
         self.state = Some(AppState {

@@ -158,7 +158,7 @@ fn make_gable_roof(
     // Gable end walls (triangles at the two ends perpendicular to the ridge)
     // + Side infill walls (triangles on the two sides parallel to the ridge)
     if ridge_along_x {
-        // Gable ends: east (x=fw) and west (x=0) — triangles in YZ plane
+        // Gable end walls (east and west) — triangles perpendicular to ridge
         for &x in &[ox, ox + fw] {
             let nx = if x < ridge_cx { -1.0 } else { 1.0 };
             out.push(make_triangle(
@@ -169,19 +169,9 @@ fn make_gable_roof(
                 wall_color,
             ));
         }
-        // Side infill: south (y=0) and north (y=fd) — triangles in XZ plane
-        for &y in &[oy, oy + fd] {
-            let ny = if y < ridge_cy { -1.0 } else { 1.0 };
-            out.push(make_triangle(
-                [ox, y, base_z],
-                [ox + fw, y, base_z],
-                [ridge_cx, y, base_z + ridge_h],
-                [0.0, ny, 0.0],
-                wall_color,
-            ));
-        }
+        // No side infill needed — roof eaves meet wall tops at same height
     } else {
-        // Gable ends: south and north
+        // Gable end walls (south and north) — triangles perpendicular to ridge
         for &y in &[oy, oy + fd] {
             let ny = if y < ridge_cy { -1.0 } else { 1.0 };
             out.push(make_triangle(
@@ -192,17 +182,7 @@ fn make_gable_roof(
                 wall_color,
             ));
         }
-        // Side infill: east and west
-        for &x in &[ox, ox + fw] {
-            let nx = if x < ridge_cx { -1.0 } else { 1.0 };
-            out.push(make_triangle(
-                [x, oy, base_z],
-                [x, oy + fd, base_z],
-                [x, ridge_cy, base_z + ridge_h],
-                [nx, 0.0, 0.0],
-                wall_color,
-            ));
-        }
+        // No side infill needed
     }
 
     out
