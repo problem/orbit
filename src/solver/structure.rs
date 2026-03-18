@@ -54,17 +54,19 @@ fn edge_strips_for_box(w: f32, h: f32, d: f32, model: Matrix4<f32>) -> Vec<Build
     edges
 }
 
-/// Helper: create a box BuildingMesh and its edge wireframe.
+/// If true, generate edge wireframes on boxes (debug visualization).
+const SHOW_EDGES: bool = false;
+
+/// Helper: create a box BuildingMesh and optionally its edge wireframe.
 fn box_with_edges(w: f32, h: f32, d: f32, model: Matrix4<f32>, color: [f32; 3]) -> Vec<BuildingMesh> {
     let mut out = vec![BuildingMesh {
-        mesh: MeshData::box_mesh(w, d, h), // box_mesh params are (width, depth, height) with Z-up
+        mesh: MeshData::box_mesh(w, d, h),
         model_matrix: model,
         color,
     }];
-    // Note: box_mesh(w, d, h) — the internal layout is width=X, depth=Y, height=Z
-    // edge_strips_for_box expects (w, h, d) where h=Z-height, d=Y-depth
-    // matching the semantic meaning, not the box_mesh parameter order
-    out.extend(edge_strips_for_box(w, h, d, model));
+    if SHOW_EDGES {
+        out.extend(edge_strips_for_box(w, h, d, model));
+    }
     out
 }
 
@@ -97,20 +99,7 @@ pub fn generate_building_meshes(building: &SolvedBuilding) -> Vec<BuildingMesh> 
             building.style.floor_color,
         ));
 
-        // --- Room ground planes (colored per room type, no edges — too thin) ---
-        for room in &floor.rooms {
-            let w = room.width as f32 - 0.02;
-            let d = room.depth as f32 - 0.02;
-            meshes.push(BuildingMesh {
-                mesh: MeshData::box_mesh(w, d, 0.01),
-                model_matrix: Matrix4::new_translation(&Vector3::new(
-                    offset.x + room.x as f32 + room.width as f32 / 2.0,
-                    offset.y + room.y as f32 + room.depth as f32 / 2.0,
-                    z0 + 0.005,
-                )),
-                color: room_color(room.room_type),
-            });
-        }
+        // Room ground planes omitted from exterior view — will be shown in floor-plan mode.
 
         // --- Exterior walls: 4 panels that meet at corners without overlap ---
         // South wall (full width)
@@ -150,37 +139,26 @@ pub fn generate_building_meshes(building: &SolvedBuilding) -> Vec<BuildingMesh> 
             building.style.exterior_color,
         ));
 
-        // --- Interior walls: deduplicated, clipped to interior zone ---
-        let interior_walls = collect_interior_walls(floor, building);
-        for wall in &interior_walls {
-            let dx = (wall.x2 - wall.x1) as f32;
-            let dy = (wall.y2 - wall.y1) as f32;
-            let length = (dx * dx + dy * dy).sqrt();
-            let cx = (wall.x1 as f32 + wall.x2 as f32) / 2.0;
-            let cy = (wall.y1 as f32 + wall.y2 as f32) / 2.0;
+        // --- Ceiling plane: inset to match slab, seals the building from above ---
+        meshes.push(BuildingMesh {
+            mesh: MeshData::box_mesh(slab_w, slab_d, 0.02),
+            model_matrix: Matrix4::new_translation(&Vector3::new(
+                offset.x + fw / 2.0,
+                offset.y + fd / 2.0,
+                z0 + ch,
+            )),
+            color: [0.95, 0.95, 0.93],
+        });
 
-            let (w, d) = if dy.abs() < 0.001 {
-                (length, int) // horizontal
-            } else {
-                (int, length) // vertical
-            };
-
-            meshes.extend(box_with_edges(w, ch, d,
-                Matrix4::new_translation(&Vector3::new(
-                    offset.x + cx,
-                    offset.y + cy,
-                    z0 + ch / 2.0,
-                )),
-                building.style.interior_wall_color,
-            ));
-        }
+        // Interior walls omitted from exterior view — they cause visual bleed-through
+        // at grazing angles. Will be shown in section-cut/floor-plan view mode.
     }
 
-    // --- Ground plane ---
+    // --- Ground plane: placed below the foundation slab to avoid z-fighting ---
     let ground_size = fw.max(fd) * 1.5;
     meshes.push(BuildingMesh {
-        mesh: MeshData::box_mesh(ground_size, ground_size, 0.02),
-        model_matrix: Matrix4::new_translation(&Vector3::new(0.0, 0.0, -0.02)),
+        mesh: MeshData::box_mesh(ground_size, ground_size, 0.05),
+        model_matrix: Matrix4::new_translation(&Vector3::new(0.0, 0.0, -slab_t - 0.025)),
         color: [0.42, 0.50, 0.32],
     });
 
@@ -297,14 +275,18 @@ fn make_roof(
 
     match roof.form {
         crate::oil::types::RoofForm::Gable => {
+            let ext = building.style.exterior_wall_thickness as f32;
             if roof.ridge_along_x {
                 let half_span = fd / 2.0;
                 let ridge_height = pitch * half_span;
+
+                // Roof planes
                 meshes.extend(make_gable_roof_planes(
                     fw, fd, ridge_height, base_z, overhang, true, offset,
                     building.style.roof_color,
                 ));
-                // Gable end walls (east and west)
+
+                // Gable end walls (east and west triangles)
                 meshes.push(make_gable_wall(
                     0.0, fd / 2.0, base_z, half_span, ridge_height, true,
                     true, offset, building.style.exterior_color,
@@ -313,9 +295,21 @@ fn make_roof(
                     fw, fd / 2.0, base_z, half_span, ridge_height, true,
                     false, offset, building.style.exterior_color,
                 ));
+
+                // South/North side walls extended up as triangular infill
+                // These fill the space between the rectangular wall top and
+                // the underside of the roof slope on each side.
+                // Each is a right triangle: base=fw, height=ridge_height, at the wall position.
+                for (y_pos, normal_sign) in [(ext / 2.0, -1.0f32), (fd - ext / 2.0, 1.0)] {
+                    meshes.push(make_side_gable_infill(
+                        fw, ridge_height, base_z, y_pos, normal_sign,
+                        offset, building.style.exterior_color,
+                    ));
+                }
             } else {
                 let half_span = fw / 2.0;
                 let ridge_height = pitch * half_span;
+
                 meshes.extend(make_gable_roof_planes(
                     fw, fd, ridge_height, base_z, overhang, false, offset,
                     building.style.roof_color,
@@ -328,6 +322,14 @@ fn make_roof(
                     fw / 2.0, fd, base_z, half_span, ridge_height, false,
                     false, offset, building.style.exterior_color,
                 ));
+
+                // East/West side walls extended up as triangular infill
+                for (x_pos, normal_sign) in [(ext / 2.0, -1.0f32), (fw - ext / 2.0, 1.0)] {
+                    meshes.push(make_side_gable_infill_ew(
+                        fd, ridge_height, base_z, x_pos, normal_sign,
+                        offset, building.style.exterior_color,
+                    ));
+                }
             }
         }
         _ => {
@@ -416,6 +418,52 @@ fn make_gable_wall(
     };
     BuildingMesh {
         mesh: MeshData { positions, normals, indices: vec![0, 1, 2, 3, 4, 5], edges: None },
+        model_matrix: Matrix4::identity(),
+        color,
+    }
+}
+
+/// Triangular infill on the south/north side walls for a gable with ridge along X.
+/// This is a triangle: left corner (x=0, z=base), right corner (x=fw, z=base),
+/// apex at (x=fw/2, z=base+ridge_height). Positioned at the wall's Y position.
+fn make_side_gable_infill(
+    fw: f32, ridge_height: f32, base_z: f32, y_pos: f32, normal_sign: f32,
+    offset: Vector3<f32>, color: [f32; 3],
+) -> BuildingMesh {
+    let n = [0.0, normal_sign, 0.0];
+    let n_back = [0.0, -normal_sign, 0.0];
+    let bl = [offset.x, offset.y + y_pos, base_z];
+    let br = [offset.x + fw, offset.y + y_pos, base_z];
+    let apex = [offset.x + fw / 2.0, offset.y + y_pos, base_z + ridge_height];
+    BuildingMesh {
+        mesh: MeshData {
+            positions: vec![bl, br, apex, apex, br, bl],
+            normals: vec![n, n, n, n_back, n_back, n_back],
+            indices: vec![0, 1, 2, 3, 4, 5],
+            edges: None,
+        },
+        model_matrix: Matrix4::identity(),
+        color,
+    }
+}
+
+/// Triangular infill on the east/west side walls for a gable with ridge along Y.
+fn make_side_gable_infill_ew(
+    fd: f32, ridge_height: f32, base_z: f32, x_pos: f32, normal_sign: f32,
+    offset: Vector3<f32>, color: [f32; 3],
+) -> BuildingMesh {
+    let n = [normal_sign, 0.0, 0.0];
+    let n_back = [-normal_sign, 0.0, 0.0];
+    let bl = [offset.x + x_pos, offset.y, base_z];
+    let br = [offset.x + x_pos, offset.y + fd, base_z];
+    let apex = [offset.x + x_pos, offset.y + fd / 2.0, base_z + ridge_height];
+    BuildingMesh {
+        mesh: MeshData {
+            positions: vec![bl, br, apex, apex, br, bl],
+            normals: vec![n, n, n, n_back, n_back, n_back],
+            indices: vec![0, 1, 2, 3, 4, 5],
+            edges: None,
+        },
         model_matrix: Matrix4::identity(),
         color,
     }
