@@ -153,12 +153,12 @@ fn make_gable_roof(
             roof_color,
         ));
 
-        // Gable end walls (east and west triangles) — snap to wall outer face
-        for &x in &[ox, ox + fw] {
+        // Gable end walls — extend to match roof overhang in both directions
+        for &x in &[x0, x1] {
             let nx = if x < ox + fw / 2.0 { -1.0 } else { 1.0 };
             out.push(make_triangle(
-                [x, oy, base_z],
-                [x, oy + fd, base_z],
+                [x, eave_s, base_z],
+                [x, eave_n, base_z],
                 [x, ridge_cy, rz],
                 [nx, 0.0, 0.0],
                 wall_color,
@@ -197,12 +197,12 @@ fn make_gable_roof(
             roof_color,
         ));
 
-        // Gable end walls (south and north)
-        for &y in &[oy, oy + fd] {
+        // Gable end walls — extend to match roof overhang in both directions
+        for &y in &[y0, y1] {
             let ny = if y < oy + fd / 2.0 { -1.0 } else { 1.0 };
             out.push(make_triangle(
-                [ox, y, base_z],
-                [ox + fw, y, base_z],
+                [eave_w, y, base_z],
+                [eave_e, y, base_z],
                 [ridge_cx, y, rz],
                 [0.0, ny, 0.0],
                 wall_color,
