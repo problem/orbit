@@ -239,10 +239,14 @@ impl RenderState {
                         };
                         self.queue.write_buffer(&drawable.uniform_buffer, 0, bytemuck::cast_slice(&[wire_color]));
                     }
-                    // Draw wireframe 5 times with pixel offsets for thickness
+                    // Draw wireframe 13 times with pixel offsets for ~5px thick lines on Retina
                     let px = 2.0 / self.config.width as f32;
                     let py = 2.0 / self.config.height as f32;
-                    let offsets = [[0.0, 0.0], [px, 0.0], [-px, 0.0], [0.0, py], [0.0, -py]];
+                    let offsets: [[f32; 2]; 13] = [
+                        [0.0, 0.0], [px, 0.0], [-px, 0.0], [0.0, py], [0.0, -py],
+                        [px, py], [-px, py], [px, -py], [-px, -py],
+                        [2.0*px, 0.0], [-2.0*px, 0.0], [0.0, 2.0*py], [0.0, -2.0*py],
+                    ];
 
                     render_pass.set_pipeline(&self.wireframe_pipeline);
                     for [ox, oy] in offsets {
@@ -268,12 +272,40 @@ impl RenderState {
                     }
                 }
                 ViewMode::WireframeOnly => {
+                    // Same multi-pass offset for thick lines
+                    let px = 2.0 / self.config.width as f32;
+                    let py = 2.0 / self.config.height as f32;
+                    let offsets = [
+                        [0.0, 0.0], [px, 0.0], [-px, 0.0], [0.0, py], [0.0, -py],
+                        [px, py], [-px, py], [px, -py], [-px, -py],
+                        [2.0*px, 0.0], [-2.0*px, 0.0], [0.0, 2.0*py], [0.0, -2.0*py],
+                    ];
+
                     render_pass.set_pipeline(&self.wireframe_pipeline);
-                    for drawable in &scene.drawables {
-                        render_pass.set_bind_group(0, &drawable.bind_group, &[]);
-                        render_pass.set_vertex_buffer(0, drawable.gpu_mesh.vertex_buffer.slice(..));
-                        render_pass.set_index_buffer(drawable.gpu_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                        render_pass.draw_indexed(0..drawable.gpu_mesh.num_indices, 0, 0..1);
+                    for [ox, oy] in offsets {
+                        let mut shifted_vp = view_proj;
+                        shifted_vp[(0, 3)] += ox;
+                        shifted_vp[(1, 3)] += oy;
+
+                        for drawable in &scene.drawables {
+                            let normal_mat = drawable.normal_matrix();
+                            let uniforms = Uniforms {
+                                view_proj: shifted_vp.into(),
+                                model: drawable.model_matrix.into(),
+                                normal_matrix: normal_mat.into(),
+                                base_color: [
+                                    drawable.base_color[0],
+                                    drawable.base_color[1],
+                                    drawable.base_color[2],
+                                    1.0,
+                                ],
+                            };
+                            self.queue.write_buffer(&drawable.uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
+                            render_pass.set_bind_group(0, &drawable.bind_group, &[]);
+                            render_pass.set_vertex_buffer(0, drawable.gpu_mesh.vertex_buffer.slice(..));
+                            render_pass.set_index_buffer(drawable.gpu_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                            render_pass.draw_indexed(0..drawable.gpu_mesh.num_indices, 0, 0..1);
+                        }
                     }
                 }
             }
