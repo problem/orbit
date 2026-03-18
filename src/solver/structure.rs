@@ -122,11 +122,12 @@ fn make_gable_roof(
     let ridge_cx = ox + fw / 2.0;
     let ridge_cy = oy + fd / 2.0;
 
-    // Two sloped roof planes
+    // Two sloped roof planes (extended slightly past ridge to avoid gap)
+    let ridge_overlap = 0.15;
     for side in [-1.0f32, 1.0] {
         let mesh = MeshData::box_mesh(
-            if ridge_along_x { length + 2.0 * overhang } else { slope_len + overhang },
-            if ridge_along_x { slope_len + overhang } else { length + 2.0 * overhang },
+            if ridge_along_x { length + 2.0 * overhang } else { slope_len + overhang + ridge_overlap },
+            if ridge_along_x { slope_len + overhang + ridge_overlap } else { length + 2.0 * overhang },
             0.05,
         );
 
