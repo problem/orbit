@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
-use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::keyboard::{Key, NamedKey};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
@@ -242,13 +242,19 @@ impl ApplicationHandler for App {
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed {
-                    if let PhysicalKey::Code(KeyCode::KeyE) = event.physical_key {
-                        state.render_state.wireframe_mode = !state.render_state.wireframe_mode;
-                        log::info!(
-                            "Wireframe mode: {}",
-                            if state.render_state.wireframe_mode { "ON" } else { "OFF" }
-                        );
-                        state.window.request_redraw();
+                    match event.logical_key.as_ref() {
+                        Key::Character("e") | Key::Character("E") => {
+                            state.render_state.wireframe_mode = !state.render_state.wireframe_mode;
+                            log::info!(
+                                "Wireframe mode: {}",
+                                if state.render_state.wireframe_mode { "ON" } else { "OFF" }
+                            );
+                            state.window.request_redraw();
+                        }
+                        Key::Named(NamedKey::Escape) => {
+                            event_loop.exit();
+                        }
+                        _ => {}
                     }
                 }
             }
