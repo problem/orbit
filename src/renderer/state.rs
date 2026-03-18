@@ -193,22 +193,30 @@ impl RenderState {
                 render_pass.draw_indexed(0..drawable.gpu_mesh.num_indices, 0, 0..1);
             }
 
-            // Pass 2: black wireframe overlay (when E is toggled)
+            // Pass 2: dark wireframe overlay (when E is toggled)
+            // Re-upload uniforms with darkened colors, then draw wireframe lines.
             if self.wireframe_mode {
-                render_pass.set_pipeline(&self.wireframe_pipeline);
-                // Overwrite uniforms with black color for wireframe pass
                 for drawable in &scene.drawables {
                     let normal_mat = drawable.normal_matrix();
-                    let black = pipeline::black_uniforms(
-                        view_proj.into(),
-                        drawable.model_matrix.into(),
-                        normal_mat.into(),
-                    );
+                    let dark = Uniforms {
+                        view_proj: view_proj.into(),
+                        model: drawable.model_matrix.into(),
+                        normal_matrix: normal_mat.into(),
+                        base_color: [
+                            drawable.base_color[0] * 0.15,
+                            drawable.base_color[1] * 0.15,
+                            drawable.base_color[2] * 0.15,
+                            1.0,
+                        ],
+                    };
                     self.queue.write_buffer(
                         &drawable.uniform_buffer,
                         0,
-                        bytemuck::cast_slice(&[black]),
+                        bytemuck::cast_slice(&[dark]),
                     );
+                }
+                render_pass.set_pipeline(&self.wireframe_pipeline);
+                for drawable in &scene.drawables {
                     render_pass.set_bind_group(0, &drawable.bind_group, &[]);
                     render_pass.set_vertex_buffer(0, drawable.gpu_mesh.vertex_buffer.slice(..));
                     render_pass.set_index_buffer(
