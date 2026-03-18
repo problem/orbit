@@ -52,10 +52,59 @@ house "Meadowbrook Tudor" {
 
 fn main() {
     env_logger::init();
+
+    // Kill any previously running orbit instance so we don't accumulate processes
+    kill_previous_orbit();
+
     log::info!("Starting Orbit CAD");
     let event_loop = EventLoop::new().expect("Failed to create event loop");
     let mut app = App::default();
     event_loop.run_app(&mut app).expect("Event loop failed");
+}
+
+/// Kill any other running orbit process (by name, excluding ourselves).
+fn kill_previous_orbit() {
+    let my_pid = std::process::id();
+    let output = std::process::Command::new("pgrep")
+        .args(["-x", "orbit"])
+        .output();
+    if let Ok(output) = output {
+        let pids = String::from_utf8_lossy(&output.stdout);
+        for line in pids.lines() {
+            if let Ok(pid) = line.trim().parse::<u32>() {
+                if pid != my_pid {
+                    log::info!("Killing previous orbit process (PID {})", pid);
+                    let _ = std::process::Command::new("kill")
+                        .arg(pid.to_string())
+                        .status();
+                }
+            }
+        }
+    }
+}
+
+/// Find the next sequential screenshot path: screenshots/NNN_YYYY-MM-DD.png
+fn next_screenshot_path() -> std::path::PathBuf {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("screenshots");
+    let _ = std::fs::create_dir_all(&dir);
+
+    // Find highest existing number
+    let mut max_num = 0u32;
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if let Some(num_str) = name.split('_').next() {
+                if let Ok(n) = num_str.parse::<u32>() {
+                    max_num = max_num.max(n);
+                }
+            }
+        }
+    }
+
+    let next = max_num + 1;
+    let date = chrono::Local::now().format("%Y-%m-%d");
+    dir.join(format!("{:03}_{}.png", next, date))
 }
 
 // --- winit Application ---
@@ -118,8 +167,8 @@ impl ApplicationHandler for App {
         render_state.camera.target = nalgebra::Point3::new(0.0, 0.0, total_height as f32 / 2.0);
         render_state.camera_controller.update_camera(&mut render_state.camera);
 
-        // Export screenshot for QA
-        let screenshot_path = std::path::PathBuf::from("/tmp/orbit_screenshot.png");
+        // Export screenshot for QA — sequentially numbered in repo
+        let screenshot_path = next_screenshot_path();
         if let Err(e) = orbit::renderer::screenshot::render_building_to_png(
             &building,
             &render_state.camera,
