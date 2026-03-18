@@ -5,107 +5,11 @@ use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
+use orbit::renderer::camera::CameraController;
 use orbit::renderer::scene::RenderScene;
 use orbit::renderer::state::RenderState;
 
-fn main() {
-    env_logger::init();
-
-    // Validate the Orb file I/O pipeline
-    validate_orb_pipeline();
-
-    // Validate the OIL parser
-    validate_oil_parser();
-
-    // Launch the renderer
-    log::info!("Starting Orbit CAD");
-    let event_loop = EventLoop::new().expect("Failed to create event loop");
-    let mut app = App::default();
-    event_loop.run_app(&mut app).expect("Event loop failed");
-}
-
-/// Create a test .orb file, write a cube with spatial data, read it all back.
-fn validate_orb_pipeline() {
-    use orbit::orb::{mesh::MeshData, read::OrbReader, types::*, write::OrbWriter};
-    use orbit::spatial::aabb::Aabb;
-    use orbit::spatial::clash::ClashResult;
-    use orbit::spatial::occupancy::{ClearanceEnvelope, OccupancyRecord};
-
-    let path = std::env::temp_dir().join("orbit_test.orb");
-    log::info!("Creating test .orb file at {:?}", path);
-
-    // Write
-    let writer = OrbWriter::create(&path).expect("Failed to create .orb");
-    writer.begin_transaction().expect("Failed to begin tx");
-
-    let mut wall = Entity::new(EntityType::Body);
-    wall.name = Some("Test Wall".to_string());
-    let wall_id = wall.id;
-    writer.insert_entity(&wall).expect("Failed to insert wall");
-
-    let mut duct = Entity::new(EntityType::Body);
-    duct.name = Some("Test Duct".to_string());
-    let duct_id = duct.id;
-    writer.insert_entity(&duct).expect("Failed to insert duct");
-
-    let cube = MeshData::cube(1.0);
-    writer.insert_mesh(&wall_id, &cube).expect("Failed to insert mesh");
-    writer.insert_mesh(&duct_id, &cube).expect("Failed to insert mesh");
-
-    let mat = Material::new("Default", "6B8EAD");
-    writer.insert_material(&mat).expect("Failed to insert material");
-
-    // Spatial index
-    let wall_aabb = Aabb::from_positions(&cube.positions).unwrap();
-    writer.upsert_spatial_entry(&wall_id, &wall_aabb).expect("Failed to insert spatial");
-    writer.upsert_spatial_entry(&duct_id, &wall_aabb).expect("Failed to insert spatial");
-
-    // Occupancy with clearance envelope
-    let wall_occ = OccupancyRecord::penetrable(wall_id, BuildingSystem::Architectural)
-        .with_clearance(ClearanceEnvelope::AaBox {
-            min: [-600.0, -100.0, 0.0],
-            max: [600.0, 100.0, 2400.0],
-        });
-    writer.insert_occupancy(&wall_occ).expect("Failed to insert occupancy");
-
-    let duct_occ = OccupancyRecord::solid(duct_id, BuildingSystem::Mechanical);
-    writer.insert_occupancy(&duct_occ).expect("Failed to insert occupancy");
-
-    // Clash result
-    let clash = ClashResult::new_hard(wall_id, duct_id);
-    writer.insert_clash_result(&clash).expect("Failed to insert clash");
-
-    writer.commit().expect("Failed to commit tx");
-    writer.finalize().expect("Failed to finalize .orb");
-
-    // Read
-    let reader = OrbReader::open(&path).expect("Failed to open .orb");
-    let meta = reader.read_meta().expect("Failed to read meta");
-    log::info!("  format_version: {}", meta.get("format_version").unwrap());
-    log::info!("  entities: {}", reader.entity_count().unwrap());
-
-    // Spatial index query
-    let hits = reader.query_spatial_index(&wall_aabb).expect("Failed to query spatial");
-    log::info!("  spatial index hits for wall AABB: {}", hits.len());
-
-    // Occupancy round-trip
-    let occ = reader.read_occupancy(&wall_id).expect("Failed to read occupancy").unwrap();
-    log::info!(
-        "  wall occupancy: type={}, system={:?}, clearances={}, priority={}",
-        occ.occupancy_type, occ.system, occ.clearance_envelopes.len(), occ.priority
-    );
-
-    // Clash round-trip
-    let clashes = reader.read_active_clashes().expect("Failed to read clashes");
-    log::info!("  active clashes: {}", clashes.len());
-
-    let _ = std::fs::remove_file(&path);
-    log::info!("Orb file I/O pipeline validated successfully (with spatial integrity)");
-}
-
-/// Parse a canonical OIL example.
-fn validate_oil_parser() {
-    let source = r#"
+const TUDOR_OIL: &str = r#"
 house "Meadowbrook Tudor" {
     site {
         footprint: 12m x 9m
@@ -146,40 +50,12 @@ house "Meadowbrook Tudor" {
 }
 "#;
 
-    match orbit::oil::parser::parse_oil(source) {
-        Ok(program) => {
-            log::info!("OIL parser validated successfully");
-            match &program {
-                orbit::oil::ast::Program::House(h) => {
-                    log::info!("  house: {:?}", h.name);
-                    if let Some(ref style) = h.style {
-                        log::info!("  style: {}", style.name);
-                        for prop in &style.overrides {
-                            log::info!("    {}: {:?}", prop.key, prop.value);
-                        }
-                    }
-                    log::info!("  floors: {}", h.floors.len());
-                    for floor in &h.floors {
-                        log::info!("    floor '{}': {} rooms", floor.name, floor.rooms.len());
-                        for room in &floor.rooms {
-                            log::info!("      room '{}': area={:?}", room.name, room.area);
-                        }
-                    }
-                    if let Some(ref roof) = h.roof {
-                        log::info!("  roof.primary: {:?}", roof.primary);
-                        log::info!("  roof.cross_gable: {:?}", roof.cross_gable);
-                        log::info!("  roof.dormers: {:?}", roof.dormers);
-                    }
-                }
-                orbit::oil::ast::Program::Furniture(f) => {
-                    log::info!("  furniture: {}", f.name);
-                }
-            }
-        }
-        Err(e) => {
-            log::error!("OIL parse error: {}", e);
-        }
-    }
+fn main() {
+    env_logger::init();
+    log::info!("Starting Orbit CAD");
+    let event_loop = EventLoop::new().expect("Failed to create event loop");
+    let mut app = App::default();
+    event_loop.run_app(&mut app).expect("Event loop failed");
 }
 
 // --- winit Application ---
@@ -206,8 +82,40 @@ impl ApplicationHandler for App {
             .with_inner_size(winit::dpi::LogicalSize::new(1280, 720));
         let window = Arc::new(event_loop.create_window(window_attrs).unwrap());
 
-        let render_state = pollster::block_on(RenderState::new(window.clone()));
-        let scene = RenderScene::test_scene(&render_state.device, &render_state.bind_group_layout);
+        let mut render_state = pollster::block_on(RenderState::new(window.clone()));
+
+        // Parse OIL
+        let program = orbit::oil::parser::parse_oil(TUDOR_OIL).expect("OIL parse failed");
+
+        // Solve
+        let building = orbit::solver::solve(&program).expect("Solver failed");
+        for d in &building.diagnostics {
+            log::warn!("solver: [{:?}] {}", d.level, d.message);
+        }
+        log::info!(
+            "Solved: {:.1}m x {:.1}m footprint, {} floors, {} total rooms",
+            building.footprint_width,
+            building.footprint_depth,
+            building.floors.len(),
+            building.floors.iter().map(|f| f.rooms.len()).sum::<usize>(),
+        );
+
+        // Build scene from solver output
+        let scene = RenderScene::from_solved_building(
+            &building,
+            &render_state.device,
+            &render_state.bind_group_layout,
+        );
+        log::info!("Scene: {} drawables", scene.drawables.len());
+
+        // Adjust camera for building scale
+        let total_height: f64 = building.floors.iter().map(|f| f.ceiling_height + building.style.floor_thickness).sum();
+        let diag = ((building.footprint_width.powi(2)
+            + building.footprint_depth.powi(2)
+            + total_height.powi(2)) as f32)
+            .sqrt();
+        render_state.camera_controller = CameraController::for_building(diag);
+        render_state.camera.target = nalgebra::Point3::new(0.0, 0.0, total_height as f32 / 2.0);
 
         self.state = Some(AppState {
             window,

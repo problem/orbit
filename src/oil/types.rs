@@ -77,6 +77,11 @@ impl Dimension {
             Unit::Unitless => self.value,
         }
     }
+
+    /// Convert to meters.
+    pub fn to_meters(&self) -> f64 {
+        self.to_mm() / 1000.0
+    }
 }
 
 impl fmt::Display for Dimension {

@@ -4,6 +4,7 @@ use wgpu::util::DeviceExt;
 use super::pipeline::Uniforms;
 use super::vertex::GpuMesh;
 use crate::orb::mesh::MeshData;
+use crate::solver::types::SolvedBuilding;
 
 /// A drawable object in the render scene with its own GPU uniform buffer.
 pub struct DrawableMesh {
@@ -104,6 +105,30 @@ impl RenderScene {
                 * Matrix4::new_translation(&nalgebra::Vector3::new(0.0, 0.0, -0.55)),
             [0.4, 0.5, 0.4],
         ));
+
+        scene
+    }
+
+    /// Create a scene from solver output.
+    pub fn from_solved_building(
+        building: &SolvedBuilding,
+        device: &wgpu::Device,
+        bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> Self {
+        use crate::solver::structure::generate_building_meshes;
+
+        let mut scene = Self::new();
+        let building_meshes = generate_building_meshes(building);
+
+        for bm in &building_meshes {
+            scene.drawables.push(DrawableMesh::new(
+                device,
+                bind_group_layout,
+                &bm.mesh,
+                bm.model_matrix,
+                bm.color,
+            ));
+        }
 
         scene
     }

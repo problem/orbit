@@ -59,6 +59,48 @@ impl MeshData {
         Ok(bytemuck::cast_slice::<u8, u32>(blob).to_vec())
     }
 
+    /// Generate an axis-aligned box centered at origin with correct per-face normals.
+    pub fn box_mesh(width: f32, height: f32, depth: f32) -> Self {
+        let hw = width / 2.0;
+        let hh = height / 2.0;
+        let hd = depth / 2.0;
+        #[rustfmt::skip]
+        let positions: Vec<[f32; 3]> = vec![
+            // Front face (y+)
+            [-hw, hd, -hh], [ hw, hd, -hh], [ hw, hd,  hh], [-hw, hd,  hh],
+            // Back face (y-)
+            [ hw,-hd, -hh], [-hw,-hd, -hh], [-hw,-hd,  hh], [ hw,-hd,  hh],
+            // Top face (z+)
+            [-hw, hd,  hh], [ hw, hd,  hh], [ hw,-hd,  hh], [-hw,-hd,  hh],
+            // Bottom face (z-)
+            [-hw,-hd, -hh], [ hw,-hd, -hh], [ hw, hd, -hh], [-hw, hd, -hh],
+            // Right face (x+)
+            [ hw, hd, -hh], [ hw,-hd, -hh], [ hw,-hd,  hh], [ hw, hd,  hh],
+            // Left face (x-)
+            [-hw,-hd, -hh], [-hw, hd, -hh], [-hw, hd,  hh], [-hw,-hd,  hh],
+        ];
+        #[rustfmt::skip]
+        let normals: Vec<[f32; 3]> = vec![
+            [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0],
+            [0.0,-1.0, 0.0], [0.0,-1.0, 0.0], [0.0,-1.0, 0.0], [0.0,-1.0, 0.0],
+            [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0],
+            [0.0, 0.0,-1.0], [0.0, 0.0,-1.0], [0.0, 0.0,-1.0], [0.0, 0.0,-1.0],
+            [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0],
+            [-1.0,0.0, 0.0], [-1.0,0.0, 0.0], [-1.0,0.0, 0.0], [-1.0,0.0, 0.0],
+        ];
+        let mut indices = Vec::new();
+        for face in 0..6u32 {
+            let base = face * 4;
+            indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+        Self {
+            positions,
+            normals,
+            indices,
+            edges: None,
+        }
+    }
+
     /// Generate a unit cube centered at the origin with correct normals.
     pub fn cube(size: f32) -> Self {
         let h = size / 2.0;

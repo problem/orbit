@@ -67,6 +67,17 @@ impl CameraController {
         }
     }
 
+    /// Create a controller sized for a building with the given diagonal.
+    pub fn for_building(diagonal: f32) -> Self {
+        Self {
+            yaw: std::f32::consts::FRAC_PI_4,
+            pitch: std::f32::consts::FRAC_PI_6,
+            distance: diagonal * 1.5,
+            is_dragging: false,
+            last_mouse: None,
+        }
+    }
+
     pub fn on_mouse_press(&mut self) {
         self.is_dragging = true;
         self.last_mouse = None;
@@ -91,7 +102,7 @@ impl CameraController {
     }
 
     pub fn on_scroll(&mut self, delta: f32) {
-        self.distance = (self.distance - delta * 0.5).clamp(0.5, 100.0);
+        self.distance = (self.distance - delta * self.distance * 0.08).clamp(0.5, 200.0);
     }
 
     pub fn update_camera(&self, camera: &mut Camera) {
