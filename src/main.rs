@@ -147,6 +147,7 @@ impl ApplicationHandler for App {
         let views: &[(&str, f32, f32)] = &[
             ("front",  1.15, 0.40),  // 3/4 front-side view
             ("gable",  0.15, 0.35),  // gable end view
+            ("rear",   -2.0, 0.40),  // rear/back view (opposite of front)
             ("above",  0.80, 1.05),  // elevated near-top-down
         ];
         for (i, (label, yaw, pitch)) in views.iter().enumerate() {
