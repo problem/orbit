@@ -31,7 +31,22 @@ pub struct SiteBlock {
 pub struct StyleBlock {
     pub name: String,
     pub parent: Option<String>,
-    pub overrides: Vec<(String, String)>,
+    pub overrides: Vec<StyleProperty>,
+}
+
+/// A style property: key + structured value.
+#[derive(Debug, Clone)]
+pub struct StyleProperty {
+    pub key: String,
+    pub value: StyleValue,
+}
+
+/// Typed style values — we parse what we can, keep the rest as text.
+#[derive(Debug, Clone)]
+pub enum StyleValue {
+    Material(MaterialSpec),
+    Pitch(Pitch),
+    Text(String),
 }
 
 #[derive(Debug, Clone)]
@@ -62,14 +77,36 @@ pub struct WindowSpec {
     pub count: u32,
 }
 
+/// Structured roof block with parsed sub-elements.
 #[derive(Debug, Clone)]
 pub struct RoofBlock {
-    pub primary: Option<String>,
-    pub cross_gable: Option<String>,
-    pub dormers: Option<String>,
+    pub primary: Option<RoofPrimary>,
+    pub cross_gable: Option<CrossGableSpec>,
+    pub dormers: Option<DormerSpec>,
     pub material: Option<MaterialSpec>,
-    pub pitch: Option<String>,
+    pub pitch: Option<Pitch>,
     pub overhang: Option<Dimension>,
+}
+
+/// Primary roof form with optional parameters.
+#[derive(Debug, Clone)]
+pub struct RoofPrimary {
+    pub form: RoofForm,
+    pub params: Vec<(String, String)>,
+}
+
+/// Cross-gable specification.
+#[derive(Debug, Clone)]
+pub struct CrossGableSpec {
+    pub over: Option<String>,
+    pub pitch: Option<Pitch>,
+}
+
+/// Dormer specification.
+#[derive(Debug, Clone)]
+pub struct DormerSpec {
+    pub count: u32,
+    pub over: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

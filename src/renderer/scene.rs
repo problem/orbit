@@ -1,13 +1,58 @@
 use nalgebra::Matrix4;
+use wgpu::util::DeviceExt;
 
+use super::pipeline::Uniforms;
 use super::vertex::GpuMesh;
 use crate::orb::mesh::MeshData;
 
-/// A drawable object in the render scene.
+/// A drawable object in the render scene with its own GPU uniform buffer.
 pub struct DrawableMesh {
     pub gpu_mesh: GpuMesh,
     pub model_matrix: Matrix4<f32>,
     pub base_color: [f32; 3],
+    pub uniform_buffer: wgpu::Buffer,
+    pub bind_group: wgpu::BindGroup,
+}
+
+impl DrawableMesh {
+    pub fn new(
+        device: &wgpu::Device,
+        bind_group_layout: &wgpu::BindGroupLayout,
+        mesh: &MeshData,
+        model_matrix: Matrix4<f32>,
+        base_color: [f32; 3],
+    ) -> Self {
+        let gpu_mesh = GpuMesh::from_mesh_data(device, mesh);
+        let uniforms = Uniforms::new();
+        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Drawable Uniform Buffer"),
+            contents: bytemuck::cast_slice(&[uniforms]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Drawable Bind Group"),
+            layout: bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+        Self {
+            gpu_mesh,
+            model_matrix,
+            base_color,
+            uniform_buffer,
+            bind_group,
+        }
+    }
+
+    /// Compute the normal matrix (inverse-transpose of model matrix).
+    pub fn normal_matrix(&self) -> Matrix4<f32> {
+        self.model_matrix
+            .try_inverse()
+            .unwrap_or_else(Matrix4::identity)
+            .transpose()
+    }
 }
 
 /// The set of objects to render.
@@ -23,33 +68,42 @@ impl RenderScene {
     }
 
     /// Create a test scene with a few colored cubes.
-    pub fn test_scene(device: &wgpu::Device) -> Self {
+    pub fn test_scene(
+        device: &wgpu::Device,
+        bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> Self {
         let mut scene = Self::new();
 
         // Main cube at origin
         let cube = MeshData::cube(1.0);
-        scene.drawables.push(DrawableMesh {
-            gpu_mesh: GpuMesh::from_mesh_data(device, &cube),
-            model_matrix: Matrix4::identity(),
-            base_color: [0.6, 0.7, 0.85], // steel blue
-        });
+        scene.drawables.push(DrawableMesh::new(
+            device,
+            bind_group_layout,
+            &cube,
+            Matrix4::identity(),
+            [0.6, 0.7, 0.85],
+        ));
 
         // Smaller cube offset to the right
         let small_cube = MeshData::cube(0.5);
-        scene.drawables.push(DrawableMesh {
-            gpu_mesh: GpuMesh::from_mesh_data(device, &small_cube),
-            model_matrix: Matrix4::new_translation(&nalgebra::Vector3::new(2.0, 0.0, 0.0)),
-            base_color: [0.85, 0.55, 0.35], // warm orange
-        });
+        scene.drawables.push(DrawableMesh::new(
+            device,
+            bind_group_layout,
+            &small_cube,
+            Matrix4::new_translation(&nalgebra::Vector3::new(2.0, 0.0, 0.0)),
+            [0.85, 0.55, 0.35],
+        ));
 
-        // Ground plane (flat cube)
+        // Ground plane (flat cube) — tests non-uniform scaling normal fix
         let ground = MeshData::cube(1.0);
-        scene.drawables.push(DrawableMesh {
-            gpu_mesh: GpuMesh::from_mesh_data(device, &ground),
-            model_matrix: Matrix4::new_nonuniform_scaling(&nalgebra::Vector3::new(5.0, 5.0, 0.05))
+        scene.drawables.push(DrawableMesh::new(
+            device,
+            bind_group_layout,
+            &ground,
+            Matrix4::new_nonuniform_scaling(&nalgebra::Vector3::new(5.0, 5.0, 0.05))
                 * Matrix4::new_translation(&nalgebra::Vector3::new(0.0, 0.0, -0.55)),
-            base_color: [0.4, 0.5, 0.4], // muted green
-        });
+            [0.4, 0.5, 0.4],
+        ));
 
         scene
     }

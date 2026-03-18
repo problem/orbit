@@ -7,7 +7,7 @@ use rusqlite::Connection;
 use super::mesh::MeshData;
 use super::schema;
 use super::transform::Transform;
-use super::types::{Entity, EntityType, Material};
+use super::types::{Entity, EntityType, Layer, Material};
 use super::uuid::OrbId;
 
 /// Reader for .orb files.
@@ -37,11 +37,41 @@ impl OrbReader {
     }
 
     pub fn read_entities(&self) -> Result<Vec<Entity>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, parent_id, name, entity_type, transform, visible, locked, layer_id, source_unit, created_at, modified_at
-             FROM orb_entities"
+        self.query_entities("SELECT id, parent_id, name, entity_type, transform, visible, locked, layer_id, source_unit, created_at, modified_at FROM orb_entities", [])
+    }
+
+    pub fn read_entity(&self, id: &OrbId) -> Result<Option<Entity>> {
+        let entities = self.query_entities(
+            "SELECT id, parent_id, name, entity_type, transform, visible, locked, layer_id, source_unit, created_at, modified_at FROM orb_entities WHERE id = ?1",
+            [id as &dyn rusqlite::types::ToSql],
         )?;
-        let rows = stmt.query_map([], |row| {
+        Ok(entities.into_iter().next())
+    }
+
+    pub fn read_entities_by_type(&self, entity_type: EntityType) -> Result<Vec<Entity>> {
+        self.query_entities(
+            "SELECT id, parent_id, name, entity_type, transform, visible, locked, layer_id, source_unit, created_at, modified_at FROM orb_entities WHERE entity_type = ?1",
+            [&entity_type.to_string() as &dyn rusqlite::types::ToSql],
+        )
+    }
+
+    pub fn read_children(&self, parent_id: &OrbId) -> Result<Vec<Entity>> {
+        self.query_entities(
+            "SELECT id, parent_id, name, entity_type, transform, visible, locked, layer_id, source_unit, created_at, modified_at FROM orb_entities WHERE parent_id = ?1",
+            [parent_id as &dyn rusqlite::types::ToSql],
+        )
+    }
+
+    pub fn read_root_entities(&self) -> Result<Vec<Entity>> {
+        self.query_entities(
+            "SELECT id, parent_id, name, entity_type, transform, visible, locked, layer_id, source_unit, created_at, modified_at FROM orb_entities WHERE parent_id IS NULL",
+            [],
+        )
+    }
+
+    fn query_entities<P: rusqlite::Params>(&self, sql: &str, params: P) -> Result<Vec<Entity>> {
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = stmt.query_map(params, |row| {
             let entity_type_str: String = row.get(3)?;
             Ok(Entity {
                 id: row.get(0)?,
@@ -115,5 +145,33 @@ impl OrbReader {
             materials.push(row?);
         }
         Ok(materials)
+    }
+
+    pub fn read_layers(&self) -> Result<Vec<Layer>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, color, visible, locked, sort_order FROM orb_layers ORDER BY sort_order",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Layer {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                color: row.get(2)?,
+                visible: row.get::<_, i32>(3).unwrap_or(1) != 0,
+                locked: row.get::<_, i32>(4).unwrap_or(0) != 0,
+                sort_order: row.get(5).unwrap_or(0),
+            })
+        })?;
+        let mut layers = Vec::new();
+        for row in rows {
+            layers.push(row?);
+        }
+        Ok(layers)
+    }
+
+    pub fn entity_count(&self) -> Result<usize> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM orb_entities", [], |row| row.get(0))?;
+        Ok(count as usize)
     }
 }

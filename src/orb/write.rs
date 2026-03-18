@@ -30,6 +30,24 @@ impl OrbWriter {
         Ok(writer)
     }
 
+    /// Begin an explicit transaction. All writes until `commit()` are atomic.
+    pub fn begin_transaction(&self) -> Result<()> {
+        self.conn.execute_batch("BEGIN TRANSACTION")?;
+        Ok(())
+    }
+
+    /// Commit the current transaction.
+    pub fn commit(&self) -> Result<()> {
+        self.conn.execute_batch("COMMIT")?;
+        Ok(())
+    }
+
+    /// Rollback the current transaction.
+    pub fn rollback(&self) -> Result<()> {
+        self.conn.execute_batch("ROLLBACK")?;
+        Ok(())
+    }
+
     pub fn set_meta(&self, key: &str, value: &str) -> Result<()> {
         self.conn.execute(
             "INSERT OR REPLACE INTO orb_meta (key, value) VALUES (?1, ?2)",

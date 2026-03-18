@@ -6,6 +6,10 @@ use super::vertex::Vertex;
 pub struct Uniforms {
     pub view_proj: [[f32; 4]; 4],
     pub model: [[f32; 4]; 4],
+    /// Inverse-transpose of model matrix for correct normal transformation
+    /// under non-uniform scaling. Stored as mat4x4 for alignment; only the
+    /// upper-left 3x3 is used in the shader.
+    pub normal_matrix: [[f32; 4]; 4],
     pub base_color: [f32; 4],
 }
 
@@ -14,6 +18,7 @@ impl Uniforms {
         Self {
             view_proj: nalgebra::Matrix4::<f32>::identity().into(),
             model: nalgebra::Matrix4::<f32>::identity().into(),
+            normal_matrix: nalgebra::Matrix4::<f32>::identity().into(),
             base_color: [0.8, 0.8, 0.8, 1.0],
         }
     }

@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
-use wgpu::util::DeviceExt;
 use winit::window::Window;
 
 use super::camera::{Camera, CameraController};
 use super::pipeline::{self, Uniforms};
-use super::scene::{DrawableMesh, RenderScene};
+use super::scene::RenderScene;
 
 pub struct RenderState {
     pub surface: wgpu::Surface<'static>,
@@ -14,12 +13,12 @@ pub struct RenderState {
     pub config: wgpu::SurfaceConfiguration,
     pub size: winit::dpi::PhysicalSize<u32>,
     pub render_pipeline: wgpu::RenderPipeline,
+    pub bind_group_layout: wgpu::BindGroupLayout,
     pub depth_texture: wgpu::Texture,
     pub depth_view: wgpu::TextureView,
-    pub uniform_buffer: wgpu::Buffer,
-    pub uniform_bind_group: wgpu::BindGroup,
     pub camera: Camera,
     pub camera_controller: CameraController,
+    // Kept alive so the wgpu surface remains valid.
     _window: Arc<Window>,
 }
 
@@ -76,27 +75,9 @@ impl RenderState {
         };
         surface.configure(&device, &config);
 
-        // Depth buffer
         let (depth_texture, depth_view) = create_depth_texture(&device, &config);
 
-        // Uniforms
-        let uniforms = Uniforms::new();
-        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Uniform Buffer"),
-            contents: bytemuck::cast_slice(&[uniforms]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
         let bind_group_layout = pipeline::create_bind_group_layout(&device);
-        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Uniform Bind Group"),
-            layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
-        });
-
         let render_pipeline =
             pipeline::create_render_pipeline(&device, surface_format, &bind_group_layout);
 
@@ -110,10 +91,9 @@ impl RenderState {
             config,
             size,
             render_pipeline,
+            bind_group_layout,
             depth_texture,
             depth_view,
-            uniform_buffer,
-            uniform_bind_group,
             camera,
             camera_controller,
             _window: window,
@@ -136,6 +116,28 @@ impl RenderState {
     pub fn render(&mut self, scene: &RenderScene) -> Result<(), wgpu::SurfaceError> {
         self.camera_controller.update_camera(&mut self.camera);
         let view_proj = self.camera.view_projection_matrix();
+
+        // Upload all uniform data BEFORE starting the render pass.
+        // Each drawable has its own buffer, so no per-draw CPU→GPU stall.
+        for drawable in &scene.drawables {
+            let normal_mat = drawable.normal_matrix();
+            let uniforms = Uniforms {
+                view_proj: view_proj.into(),
+                model: drawable.model_matrix.into(),
+                normal_matrix: normal_mat.into(),
+                base_color: [
+                    drawable.base_color[0],
+                    drawable.base_color[1],
+                    drawable.base_color[2],
+                    1.0,
+                ],
+            };
+            self.queue.write_buffer(
+                &drawable.uniform_buffer,
+                0,
+                bytemuck::cast_slice(&[uniforms]),
+            );
+        }
 
         let output = self.surface.get_current_texture()?;
         let view = output
@@ -177,44 +179,21 @@ impl RenderState {
 
             render_pass.set_pipeline(&self.render_pipeline);
 
+            // Draw each object — only bind group switch, no buffer writes during the pass
             for drawable in &scene.drawables {
-                self.draw_mesh(&mut render_pass, drawable, &view_proj);
+                render_pass.set_bind_group(0, &drawable.bind_group, &[]);
+                render_pass.set_vertex_buffer(0, drawable.gpu_mesh.vertex_buffer.slice(..));
+                render_pass.set_index_buffer(
+                    drawable.gpu_mesh.index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
+                render_pass.draw_indexed(0..drawable.gpu_mesh.num_indices, 0, 0..1);
             }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
         Ok(())
-    }
-
-    fn draw_mesh(
-        &self,
-        render_pass: &mut wgpu::RenderPass<'_>,
-        drawable: &DrawableMesh,
-        view_proj: &nalgebra::Matrix4<f32>,
-    ) {
-        let uniforms = Uniforms {
-            view_proj: (*view_proj).into(),
-            model: drawable.model_matrix.into(),
-            base_color: [
-                drawable.base_color[0],
-                drawable.base_color[1],
-                drawable.base_color[2],
-                1.0,
-            ],
-        };
-        self.queue.write_buffer(
-            &self.uniform_buffer,
-            0,
-            bytemuck::cast_slice(&[uniforms]),
-        );
-        render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
-        render_pass.set_vertex_buffer(0, drawable.gpu_mesh.vertex_buffer.slice(..));
-        render_pass.set_index_buffer(
-            drawable.gpu_mesh.index_buffer.slice(..),
-            wgpu::IndexFormat::Uint32,
-        );
-        render_pass.draw_indexed(0..drawable.gpu_mesh.num_indices, 0, 0..1);
     }
 }
 

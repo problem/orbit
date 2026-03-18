@@ -119,13 +119,23 @@ house "Meadowbrook Tudor" {
             match &program {
                 orbit::oil::ast::Program::House(h) => {
                     log::info!("  house: {:?}", h.name);
-                    log::info!("  style: {:?}", h.style.as_ref().map(|s| &s.name));
+                    if let Some(ref style) = h.style {
+                        log::info!("  style: {}", style.name);
+                        for prop in &style.overrides {
+                            log::info!("    {}: {:?}", prop.key, prop.value);
+                        }
+                    }
                     log::info!("  floors: {}", h.floors.len());
                     for floor in &h.floors {
                         log::info!("    floor '{}': {} rooms", floor.name, floor.rooms.len());
                         for room in &floor.rooms {
                             log::info!("      room '{}': area={:?}", room.name, room.area);
                         }
+                    }
+                    if let Some(ref roof) = h.roof {
+                        log::info!("  roof.primary: {:?}", roof.primary);
+                        log::info!("  roof.cross_gable: {:?}", roof.cross_gable);
+                        log::info!("  roof.dormers: {:?}", roof.dormers);
                     }
                 }
                 orbit::oil::ast::Program::Furniture(f) => {
@@ -164,7 +174,7 @@ impl ApplicationHandler for App {
         let window = Arc::new(event_loop.create_window(window_attrs).unwrap());
 
         let render_state = pollster::block_on(RenderState::new(window.clone()));
-        let scene = RenderScene::test_scene(&render_state.device);
+        let scene = RenderScene::test_scene(&render_state.device, &render_state.bind_group_layout);
 
         self.state = Some(AppState {
             window,

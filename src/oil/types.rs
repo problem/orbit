@@ -11,6 +11,8 @@ pub enum Unit {
     Ft,
     Sqm,
     Sqft,
+    /// Unitless value (aspect ratios, counts).
+    Unitless,
 }
 
 impl Unit {
@@ -29,6 +31,7 @@ impl fmt::Display for Unit {
             Self::Ft => write!(f, "ft"),
             Self::Sqm => write!(f, "sqm"),
             Self::Sqft => write!(f, "sqft"),
+            Self::Unitless => write!(f, ""),
         }
     }
 }
@@ -69,8 +72,9 @@ impl Dimension {
             Unit::M => self.value * 1000.0,
             Unit::In => self.value * 25.4,
             Unit::Ft => self.value * 304.8,
-            Unit::Sqm => self.value * 1_000_000.0, // sqmm
-            Unit::Sqft => self.value * 92_903.04,   // sqmm
+            Unit::Sqm => self.value * 1_000_000.0,
+            Unit::Sqft => self.value * 92_903.04,
+            Unit::Unitless => self.value,
         }
     }
 }
@@ -84,7 +88,7 @@ impl fmt::Display for Dimension {
 /// An approximate, range, or exact value.
 #[derive(Debug, Clone)]
 pub enum ApproxValue {
-    /// `~25sqm` — target with ±20% tolerance
+    /// `~25sqm` — target with +/-20% tolerance
     Approximate(f64, Unit),
     /// `20sqm..30sqm` — hard bounds
     Range(f64, f64, Unit),
@@ -272,8 +276,8 @@ impl FromStr for CeilingType {
     }
 }
 
-/// Roof form.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Roof form with optional parameters.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RoofForm {
     Gable,
     Hip,
@@ -295,6 +299,19 @@ impl FromStr for RoofForm {
             "mansard" => Ok(Self::Mansard),
             _ => Err(format!("unknown roof form: {s}")),
         }
+    }
+}
+
+/// Roof pitch as rise:run ratio.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Pitch {
+    pub rise: f64,
+    pub run: f64,
+}
+
+impl fmt::Display for Pitch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.rise, self.run)
     }
 }
 

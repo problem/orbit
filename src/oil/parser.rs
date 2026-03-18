@@ -8,10 +8,11 @@ pub struct Parser {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("parse error at line {line}: {message}")]
+#[error("parse error at line {line}, col {col}: {message}")]
 pub struct ParseError {
     pub message: String,
     pub line: usize,
+    pub col: usize,
 }
 
 impl Parser {
@@ -133,8 +134,20 @@ impl Parser {
             while !self.check(TokenKind::RBrace) && !self.check(TokenKind::Eof) {
                 let key = self.expect_ident()?;
                 self.expect(TokenKind::Colon)?;
-                let value = self.consume_value_text();
-                overrides.push((key, value));
+
+                // Try to parse structured values based on key name
+                let value = if key.ends_with("_material") || key == "material" {
+                    StyleValue::Material(self.parse_material_spec()?)
+                } else if key.ends_with("_pitch") || key == "pitch" {
+                    match self.try_parse_pitch() {
+                        Some(p) => StyleValue::Pitch(p),
+                        None => StyleValue::Text(self.consume_value_text()),
+                    }
+                } else {
+                    StyleValue::Text(self.consume_value_text())
+                };
+
+                overrides.push(StyleProperty { key, value });
                 self.try_consume(TokenKind::Comma);
             }
             self.expect(TokenKind::RBrace)?;
@@ -223,11 +236,7 @@ impl Parser {
                     room.ceiling = val.parse().ok();
                 }
                 "flooring" => {
-                    let val = self.consume_value_text();
-                    room.flooring = Some(MaterialSpec {
-                        material_type: val,
-                        color: None,
-                    });
+                    room.flooring = Some(self.parse_material_spec()?);
                 }
                 "purpose" => {
                     let val = self.expect_ident()?;
@@ -259,38 +268,36 @@ impl Parser {
             overhang: None,
         };
 
-        // Roof properties have complex inline syntax (e.g., "dormers: 2, over [bedroom_2, bedroom_3]")
-        // so we consume entire lines as value text, stopping only at newline-level boundaries.
         while !self.check(TokenKind::RBrace) && !self.check(TokenKind::Eof) {
             let key = self.expect_ident()?;
-            // Some roof sub-properties (like "over") don't have a colon — they're continuations
-            // of the previous property. Collect them into the previous value.
+
+            // Handle continuation tokens without colon (e.g., "over [bedroom_2, bedroom_3]")
             if !self.check(TokenKind::Colon) {
-                // This is a continuation like "over [bedroom_2, bedroom_3]"
-                let rest = self.consume_value_text();
-                let combined = format!("{key} {rest}");
-                // Append to dormers/cross_gable if they exist
-                if let Some(ref mut d) = roof.dormers {
-                    *d = format!("{d}, {combined}");
-                } else if let Some(ref mut cg) = roof.cross_gable {
-                    *cg = format!("{cg}, {combined}");
+                if key == "over" {
+                    let rooms = self.parse_ref_list()?;
+                    // Attach to the most recently parsed property
+                    if let Some(ref mut d) = roof.dormers {
+                        d.over = rooms;
+                    } else if let Some(ref mut cg) = roof.cross_gable {
+                        cg.over = Some(rooms.into_iter().next().unwrap_or_default());
+                    }
+                } else {
+                    self.consume_value_text();
                 }
                 self.try_consume(TokenKind::Comma);
                 continue;
             }
+
             self.expect(TokenKind::Colon)?;
             match key.as_str() {
-                "primary" => roof.primary = Some(self.consume_value_text()),
-                "cross_gable" => roof.cross_gable = Some(self.consume_value_text()),
-                "dormers" => roof.dormers = Some(self.consume_value_text()),
-                "material" => {
-                    let val = self.consume_value_text();
-                    roof.material = Some(MaterialSpec {
-                        material_type: val,
-                        color: None,
-                    });
-                }
-                "pitch" => roof.pitch = Some(self.consume_value_text()),
+                "primary" => roof.primary = Some(self.parse_roof_primary()?),
+                "cross_gable" => roof.cross_gable = Some(self.parse_cross_gable()?),
+                "dormers" => roof.dormers = Some(self.parse_dormer_spec()?),
+                "material" => roof.material = Some(self.parse_material_spec()?),
+                "pitch" => roof.pitch = self.try_parse_pitch().or_else(|| {
+                    self.consume_value_text();
+                    None
+                }),
                 "overhang" => roof.overhang = self.try_parse_dimension(),
                 _ => {
                     self.consume_value_text();
@@ -301,6 +308,79 @@ impl Parser {
 
         self.expect(TokenKind::RBrace)?;
         Ok(roof)
+    }
+
+    /// Parse `gable(ridge: east-west)` or `hip` or `shed(south)`.
+    fn parse_roof_primary(&mut self) -> Result<RoofPrimary, ParseError> {
+        let form_name = self.expect_ident()?;
+        let form = form_name
+            .parse::<RoofForm>()
+            .map_err(|e| self.error(&e))?;
+
+        let mut params = Vec::new();
+        if self.try_consume(TokenKind::LParen) {
+            while !self.check(TokenKind::RParen) && !self.check(TokenKind::Eof) {
+                let k = self.expect_ident()?;
+                if self.try_consume(TokenKind::Colon) {
+                    let v = self.expect_ident()?;
+                    params.push((k, v));
+                } else {
+                    // Positional parameter like `shed(south)`
+                    params.push(("direction".to_string(), k));
+                }
+                self.try_consume(TokenKind::Comma);
+            }
+            self.expect(TokenKind::RParen)?;
+        }
+
+        Ok(RoofPrimary { form, params })
+    }
+
+    /// Parse `over entry, pitch: 10:12`.
+    fn parse_cross_gable(&mut self) -> Result<CrossGableSpec, ParseError> {
+        let mut spec = CrossGableSpec {
+            over: None,
+            pitch: None,
+        };
+
+        // Expect "over <room_name>"
+        if let TokenKind::Ident(ref s) = self.peek_kind() {
+            if s == "over" {
+                self.advance();
+                spec.over = Some(self.expect_ident()?);
+            }
+        }
+
+        // Optional ", pitch: N:N"
+        if self.try_consume(TokenKind::Comma) {
+            if let TokenKind::Ident(ref s) = self.peek_kind() {
+                if s == "pitch" {
+                    self.advance();
+                    self.expect(TokenKind::Colon)?;
+                    spec.pitch = self.try_parse_pitch();
+                }
+            }
+        }
+
+        Ok(spec)
+    }
+
+    /// Parse `2, over [bedroom_2, bedroom_3]` or just `2`.
+    fn parse_dormer_spec(&mut self) -> Result<DormerSpec, ParseError> {
+        let count = self.expect_number()? as u32;
+        let mut over = Vec::new();
+
+        // The "over [...rooms]" may follow after a comma
+        if self.try_consume(TokenKind::Comma) {
+            if let TokenKind::Ident(ref s) = self.peek_kind() {
+                if s == "over" {
+                    self.advance();
+                    over = self.parse_ref_list()?;
+                }
+            }
+        }
+
+        Ok(DormerSpec { count, over })
     }
 
     // --- Facade ---
@@ -362,7 +442,52 @@ impl Parser {
         Ok(FurnitureBlock { name, properties })
     }
 
-    // --- Helpers ---
+    // --- Structured Value Parsers ---
+
+    /// Parse `stucco("cream")` or `timber("dark oak")` or bare `hardwood`.
+    fn parse_material_spec(&mut self) -> Result<MaterialSpec, ParseError> {
+        let material_type = self.expect_ident()?;
+        let color = if self.try_consume(TokenKind::LParen) {
+            let c = match self.peek_kind() {
+                TokenKind::StringLit(s) => {
+                    let s = s.clone();
+                    self.advance();
+                    Some(s)
+                }
+                _ => {
+                    // Non-string param like `casement(mullioned)` — consume as text
+                    let text = self.consume_value_text();
+                    Some(text)
+                }
+            };
+            self.expect(TokenKind::RParen)?;
+            c
+        } else {
+            None
+        };
+        Ok(MaterialSpec {
+            material_type,
+            color,
+        })
+    }
+
+    /// Try to parse a pitch ratio like `12:12` or `10:12`.
+    /// Returns None if the next tokens don't form a valid pitch.
+    fn try_parse_pitch(&mut self) -> Option<Pitch> {
+        if let TokenKind::Number(rise) = self.peek_kind() {
+            let saved = self.pos;
+            self.advance();
+            if self.try_consume(TokenKind::Colon) {
+                if let TokenKind::Number(run) = self.peek_kind() {
+                    self.advance();
+                    return Some(Pitch { rise, run });
+                }
+            }
+            // Backtrack if not a valid pitch
+            self.pos = saved;
+        }
+        None
+    }
 
     fn parse_dimension(&mut self) -> Result<Dimension, ParseError> {
         let num = self.expect_number()?;
@@ -389,8 +514,8 @@ impl Parser {
                 let unit = unit_str.parse::<Unit>().map_err(|e| self.error(&e))?;
                 return Ok(ApproxValue::Approximate(num, unit));
             }
-            // Approximate without unit (e.g., ~1.5 for aspect)
-            return Ok(ApproxValue::Approximate(num, Unit::Mm));
+            // Approximate without unit (e.g., ~1.5 for aspect ratio)
+            return Ok(ApproxValue::Approximate(num, Unit::Unitless));
         }
 
         // Check for qualitative
@@ -413,7 +538,7 @@ impl Parser {
             let unit = unit_str
                 .or(unit_str2)
                 .and_then(|s| s.parse::<Unit>().ok())
-                .unwrap_or(Unit::Mm);
+                .unwrap_or(Unit::Unitless);
             return Ok(ApproxValue::Range(num, num2, unit));
         }
 
@@ -421,13 +546,12 @@ impl Parser {
             let unit = u.parse::<Unit>().map_err(|e| self.error(&e))?;
             Ok(ApproxValue::Exact(num, unit))
         } else {
-            // Plain number (e.g., aspect ratio)
-            Ok(ApproxValue::Exact(num, Unit::Mm))
+            // Plain number (e.g., aspect ratio 1.5)
+            Ok(ApproxValue::Exact(num, Unit::Unitless))
         }
     }
 
     fn parse_ref_list(&mut self) -> Result<Vec<String>, ParseError> {
-        // Either a single ident or [ident, ident, ...]
         if self.try_consume(TokenKind::LBracket) {
             let mut refs = Vec::new();
             while !self.check(TokenKind::RBracket) && !self.check(TokenKind::Eof) {
@@ -437,7 +561,6 @@ impl Parser {
             self.expect(TokenKind::RBracket)?;
             Ok(refs)
         } else {
-            // Single ref
             Ok(vec![self.expect_ident()?])
         }
     }
@@ -449,7 +572,6 @@ impl Parser {
             match r.parse::<Feature>() {
                 Ok(f) => features.push(f),
                 Err(_) => {
-                    // Warn but don't fail — per spec, unrecognized enum values fall back
                     log::warn!("unrecognized feature: {r}");
                 }
             }
@@ -483,8 +605,7 @@ impl Parser {
         Ok(specs)
     }
 
-    /// Consume tokens until we hit a comma, closing brace, or newline-level boundary.
-    /// Returns the text representation.
+    /// Consume tokens until we hit a comma, closing brace, or block-level boundary.
     fn consume_value_text(&mut self) -> String {
         let mut parts = Vec::new();
         let mut depth = 0;
@@ -494,7 +615,6 @@ impl Parser {
                 TokenKind::Comma if depth == 0 => break,
                 TokenKind::RBrace if depth == 0 => break,
                 TokenKind::Eof => break,
-                // If we see a keyword at depth 0, it's the start of a new block
                 TokenKind::Room | TokenKind::Floor | TokenKind::Roof | TokenKind::Facade
                 | TokenKind::Landscape | TokenKind::Site | TokenKind::Style
                     if depth == 0 => break,
@@ -559,7 +679,6 @@ impl Parser {
                 self.advance();
                 Ok(s)
             }
-            // Some identifiers are also keywords in other contexts
             TokenKind::X => {
                 self.advance();
                 Ok("x".to_string())
@@ -632,13 +751,12 @@ impl Parser {
                 Some(s)
             }
             TokenKind::Ident(s) if !matches!(self.tokens.get(self.pos + 1).map(|t| &t.kind), Some(TokenKind::Colon)) => {
-                // Only consume if it's not a key:value pair start
                 let next_is_brace = matches!(
                     self.tokens.get(self.pos + 1).map(|t| &t.kind),
                     Some(TokenKind::LBrace)
                 );
                 if next_is_brace {
-                    None // It's a block name like "style tudor {", not the house name
+                    None
                 } else {
                     let s = s.clone();
                     self.advance();
@@ -650,14 +768,15 @@ impl Parser {
     }
 
     fn error(&self, msg: &str) -> ParseError {
-        let line = self
+        let (line, col) = self
             .tokens
             .get(self.pos)
-            .map(|t| t.span.line)
-            .unwrap_or(0);
+            .map(|t| (t.span.line, t.span.col))
+            .unwrap_or((0, 0));
         ParseError {
             message: msg.to_string(),
             line,
+            col,
         }
     }
 }
@@ -667,6 +786,7 @@ pub fn parse_oil(source: &str) -> Result<Program, ParseError> {
     let tokens = super::lexer::tokenize(source).map_err(|e| ParseError {
         message: e.message,
         line: e.line,
+        col: e.col,
     })?;
     let mut parser = Parser::new(tokens);
     parser.parse()

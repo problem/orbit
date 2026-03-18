@@ -1,6 +1,7 @@
 struct Uniforms {
     view_proj: mat4x4<f32>,
     model: mat4x4<f32>,
+    normal_matrix: mat4x4<f32>,
     base_color: vec4<f32>,
 };
 
@@ -22,8 +23,8 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     let world_pos = uniforms.model * vec4<f32>(in.position, 1.0);
     out.clip_position = uniforms.view_proj * world_pos;
-    // Transform normal by the model matrix (ignoring translation)
-    out.world_normal = normalize((uniforms.model * vec4<f32>(in.normal, 0.0)).xyz);
+    // Use the inverse-transpose (normal_matrix) for correct normals under non-uniform scaling
+    out.world_normal = normalize((uniforms.normal_matrix * vec4<f32>(in.normal, 0.0)).xyz);
     out.world_position = world_pos.xyz;
     return out;
 }
