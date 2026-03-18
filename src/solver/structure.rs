@@ -105,7 +105,8 @@ fn make_box(w: f32, d: f32, h: f32, cx: f32, cy: f32, cz: f32, color: [f32; 3]) 
     }
 }
 
-/// Gable roof: two sloped planes + two triangular gable end walls + two side infill triangles.
+/// Gable roof with exact vertex positions — no rotation math.
+/// Every vertex snaps precisely to the building geometry.
 fn make_gable_roof(
     fw: f32, fd: f32, base_z: f32, pitch: f32, overhang: f32,
     ridge_along_x: bool, ox: f32, oy: f32,
@@ -113,80 +114,121 @@ fn make_gable_roof(
 ) -> Vec<BuildingMesh> {
     let mut out = Vec::new();
 
-    let (span, length) = if ridge_along_x { (fd, fw) } else { (fw, fd) };
-    let half_span = span / 2.0;
-    let ridge_h = pitch * half_span;
-    let slope_len = (half_span * half_span + ridge_h * ridge_h).sqrt();
-
-    // Ridge center position
-    let ridge_cx = ox + fw / 2.0;
-    let ridge_cy = oy + fd / 2.0;
-
-    // Two sloped roof planes (extended slightly past ridge to avoid gap)
-    let ridge_overlap = 0.15;
-    for side in [-1.0f32, 1.0] {
-        let mesh = MeshData::box_mesh(
-            if ridge_along_x { length + 2.0 * overhang } else { slope_len + overhang + ridge_overlap },
-            if ridge_along_x { slope_len + overhang + ridge_overlap } else { length + 2.0 * overhang },
-            0.05,
-        );
-
-        let slope_angle = (ridge_h / half_span).atan();
-
-        let model = if ridge_along_x {
-            // Slopes face N/S, rotate around X
-            let mid_y = ridge_cy + side * half_span / 2.0;
-            let mid_z = base_z + ridge_h / 2.0;
-            let rot = nalgebra::UnitQuaternion::from_axis_angle(
-                &nalgebra::Vector3::x_axis(), slope_angle * side,
-            );
-            Matrix4::new_translation(&Vector3::new(ridge_cx, mid_y, mid_z))
-                * rot.to_homogeneous()
-        } else {
-            // Slopes face E/W, rotate around Y
-            let mid_x = ridge_cx + side * half_span / 2.0;
-            let mid_z = base_z + ridge_h / 2.0;
-            let rot = nalgebra::UnitQuaternion::from_axis_angle(
-                &nalgebra::Vector3::y_axis(), -slope_angle * side,
-            );
-            Matrix4::new_translation(&Vector3::new(mid_x, ridge_cy, mid_z))
-                * rot.to_homogeneous()
-        };
-
-        out.push(BuildingMesh { mesh, model_matrix: model, color: roof_color });
-    }
-
-    // Gable end walls (triangles at the two ends perpendicular to the ridge)
-    // + Side infill walls (triangles on the two sides parallel to the ridge)
     if ridge_along_x {
-        // Gable end walls (east and west) — triangles perpendicular to ridge
+        // Ridge runs along X. Slopes face south and north.
+        let half_span = fd / 2.0;
+        let ridge_h = pitch * half_span;
+        let ridge_cy = oy + fd / 2.0;
+
+        // Exact vertex positions:
+        // Eave south: y=oy-overhang, z=base_z (with overhang extension)
+        // Eave north: y=oy+fd+overhang, z=base_z
+        // Ridge: y=ridge_cy, z=base_z+ridge_h
+        // X range: ox-overhang to ox+fw+overhang
+        let x0 = ox - overhang;
+        let x1 = ox + fw + overhang;
+        let eave_s = oy - overhang;
+        let eave_n = oy + fd + overhang;
+        let rz = base_z + ridge_h;
+
+        // Compute slope normal for south face
+        let slope_dy = half_span + overhang;
+        let slope_dz = ridge_h;
+        let slope_normal_len = (slope_dy * slope_dy + slope_dz * slope_dz).sqrt();
+        let sn_y = -slope_dz / slope_normal_len;
+        let sn_z = slope_dy / slope_normal_len;
+
+        // South slope: quad from south eave to ridge
+        out.push(make_quad(
+            [x0, eave_s, base_z], [x1, eave_s, base_z],
+            [x1, ridge_cy, rz],   [x0, ridge_cy, rz],
+            [0.0, sn_y, sn_z],
+            roof_color,
+        ));
+        // North slope: quad from ridge to north eave
+        out.push(make_quad(
+            [x0, ridge_cy, rz],   [x1, ridge_cy, rz],
+            [x1, eave_n, base_z], [x0, eave_n, base_z],
+            [0.0, -sn_y, sn_z],
+            roof_color,
+        ));
+
+        // Gable end walls (east and west triangles) — snap to wall outer face
         for &x in &[ox, ox + fw] {
-            let nx = if x < ridge_cx { -1.0 } else { 1.0 };
+            let nx = if x < ox + fw / 2.0 { -1.0 } else { 1.0 };
             out.push(make_triangle(
                 [x, oy, base_z],
                 [x, oy + fd, base_z],
-                [x, ridge_cy, base_z + ridge_h],
+                [x, ridge_cy, rz],
                 [nx, 0.0, 0.0],
                 wall_color,
             ));
         }
-        // No side infill needed — roof eaves meet wall tops at same height
     } else {
-        // Gable end walls (south and north) — triangles perpendicular to ridge
+        // Ridge runs along Y. Slopes face east and west.
+        let half_span = fw / 2.0;
+        let ridge_h = pitch * half_span;
+        let ridge_cx = ox + fw / 2.0;
+
+        let y0 = oy - overhang;
+        let y1 = oy + fd + overhang;
+        let eave_w = ox - overhang;
+        let eave_e = ox + fw + overhang;
+        let rz = base_z + ridge_h;
+
+        let slope_dx = half_span + overhang;
+        let slope_dz = ridge_h;
+        let slope_normal_len = (slope_dx * slope_dx + slope_dz * slope_dz).sqrt();
+        let sn_x = -slope_dz / slope_normal_len;
+        let sn_z = slope_dx / slope_normal_len;
+
+        // West slope
+        out.push(make_quad(
+            [eave_w, y0, base_z], [eave_w, y1, base_z],
+            [ridge_cx, y1, rz],   [ridge_cx, y0, rz],
+            [sn_x, 0.0, sn_z],
+            roof_color,
+        ));
+        // East slope
+        out.push(make_quad(
+            [ridge_cx, y0, rz],   [ridge_cx, y1, rz],
+            [eave_e, y1, base_z], [eave_e, y0, base_z],
+            [-sn_x, 0.0, sn_z],
+            roof_color,
+        ));
+
+        // Gable end walls (south and north)
         for &y in &[oy, oy + fd] {
-            let ny = if y < ridge_cy { -1.0 } else { 1.0 };
+            let ny = if y < oy + fd / 2.0 { -1.0 } else { 1.0 };
             out.push(make_triangle(
                 [ox, y, base_z],
                 [ox + fw, y, base_z],
-                [ridge_cx, y, base_z + ridge_h],
+                [ridge_cx, y, rz],
                 [0.0, ny, 0.0],
                 wall_color,
             ));
         }
-        // No side infill needed
     }
 
     out
+}
+
+/// Double-sided quad mesh with explicit vertices. a,b,c,d in CCW order for the front face.
+fn make_quad(
+    a: [f32; 3], b: [f32; 3], c: [f32; 3], d: [f32; 3],
+    normal: [f32; 3], color: [f32; 3],
+) -> BuildingMesh {
+    let back = [-normal[0], -normal[1], -normal[2]];
+    BuildingMesh {
+        mesh: MeshData {
+            positions: vec![a, b, c, d, d, c, b, a],
+            normals: vec![normal, normal, normal, normal, back, back, back, back],
+            indices: vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7],
+            edges: None,
+        },
+        model_matrix: Matrix4::identity(),
+        color,
+    }
 }
 
 /// Double-sided triangle mesh.
