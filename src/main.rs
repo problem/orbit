@@ -116,6 +116,19 @@ impl ApplicationHandler for App {
             .sqrt();
         render_state.camera_controller = CameraController::for_building(diag);
         render_state.camera.target = nalgebra::Point3::new(0.0, 0.0, total_height as f32 / 2.0);
+        render_state.camera_controller.update_camera(&mut render_state.camera);
+
+        // Export screenshot for QA
+        let screenshot_path = std::path::PathBuf::from("/tmp/orbit_screenshot.png");
+        if let Err(e) = orbit::renderer::screenshot::render_building_to_png(
+            &building,
+            &render_state.camera,
+            1920,
+            1080,
+            &screenshot_path,
+        ) {
+            log::warn!("Screenshot export failed: {}", e);
+        }
 
         self.state = Some(AppState {
             window,

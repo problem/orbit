@@ -96,13 +96,14 @@ fn collect_wall_segments(floor: &SolvedFloor, building: &SolvedBuilding) -> Vec<
     let mut segments: Vec<WallSegment> = Vec::new();
     let _ext = building.style.exterior_wall_thickness;
 
-    // Exterior walls (footprint boundary)
+    // Exterior walls, inset by half their thickness so they sit within the slab
     let fw = building.footprint_width;
     let fd = building.footprint_depth;
-    segments.push(WallSegment { x1: 0.0, y1: 0.0, x2: fw, y2: 0.0, is_exterior: true }); // south
-    segments.push(WallSegment { x1: fw, y1: 0.0, x2: fw, y2: fd, is_exterior: true }); // east
-    segments.push(WallSegment { x1: fw, y1: fd, x2: 0.0, y2: fd, is_exterior: true }); // north
-    segments.push(WallSegment { x1: 0.0, y1: fd, x2: 0.0, y2: 0.0, is_exterior: true }); // west
+    let hw = _ext / 2.0;
+    segments.push(WallSegment { x1: 0.0, y1: hw, x2: fw, y2: hw, is_exterior: true });       // south
+    segments.push(WallSegment { x1: fw - hw, y1: 0.0, x2: fw - hw, y2: fd, is_exterior: true }); // east
+    segments.push(WallSegment { x1: fw, y1: fd - hw, x2: 0.0, y2: fd - hw, is_exterior: true }); // north
+    segments.push(WallSegment { x1: hw, y1: fd, x2: hw, y2: 0.0, is_exterior: true });       // west
 
     // Interior walls from room boundaries
     // For each room edge that doesn't coincide with the footprint boundary,
@@ -121,10 +122,13 @@ fn collect_wall_segments(floor: &SolvedFloor, building: &SolvedBuilding) -> Vec<
         ];
 
         for (ex1, ey1, ex2, ey2) in edges {
-            let on_boundary = (ex1.abs() < tol && ex2.abs() < tol)         // left boundary (before inset)
-                || ((ex1 - fw).abs() < tol && (ex2 - fw).abs() < tol)       // right
-                || (ey1.abs() < tol && ey2.abs() < tol)                     // bottom
-                || ((ey1 - fd).abs() < tol && (ey2 - fd).abs() < tol);      // top
+            // Skip edges near the footprint boundary — those are the interior
+            // faces of exterior walls and don't need separate interior walls.
+            let ext_t = building.style.exterior_wall_thickness + tol;
+            let on_boundary = ex1 < ext_t && ex2 < ext_t                          // near left
+                || (fw - ex1) < ext_t && (fw - ex2) < ext_t                       // near right
+                || ey1 < ext_t && ey2 < ext_t                                     // near bottom
+                || (fd - ey1) < ext_t && (fd - ey2) < ext_t;                      // near top
 
             if on_boundary {
                 continue; // exterior walls already added

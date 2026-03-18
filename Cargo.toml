@@ -42,3 +42,6 @@ pollster = "0.4"
 
 # Zero-copy byte casting for packed BLOBs and GPU buffers
 bytemuck = { version = "1", features = ["derive"] }
+
+# PNG export for screenshots
+image = "0.25"
