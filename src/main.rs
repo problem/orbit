@@ -10,42 +10,22 @@ use orbit::renderer::scene::RenderScene;
 use orbit::renderer::state::RenderState;
 
 const TUDOR_OIL: &str = r#"
-house "Meadowbrook Tudor" {
+house "Simple Tudor" {
     site {
-        footprint: 12m x 9m
-        orientation: north
-        setback: front 6m, sides 3m
+        footprint: 8m x 6m
     }
 
     style tudor {
-        roof_pitch: 12:12
+        roof_pitch: 10:12
         facade_material: stucco("cream")
-        accent_material: timber("dark oak")
-        window_style: casement(mullioned, divided_lite: 6)
     }
 
     floor ground {
-        room entry      { area: ~6sqm, connects: [living, dining], has: front_door }
-        room living     { area: ~25sqm, aspect: 1.5, windows: south 2, has: fireplace }
-        room kitchen    { area: ~15sqm, adjacent_to: living, windows: east 1, has: island }
-        room dining     { area: ~12sqm, adjacent_to: [kitchen, living], windows: south 1 }
-        room half_bath  { area: ~4sqm, adjacent_to: kitchen }
-        room garage     { area: ~35sqm, side: west, has: garage_double }
-    }
-
-    floor upper {
-        room master_bed  { area: ~18sqm, windows: south 2, has: walk_in_closet }
-        room master_bath { area: ~8sqm, adjacent_to: master_bed, has: [shower, tub, double_vanity] }
-        room bedroom_2   { area: ~13sqm, windows: north 1, has: closet }
-        room bedroom_3   { area: ~12sqm, windows: east 1, has: closet }
-        room full_bath   { area: ~6sqm, adjacent_to: [bedroom_2, bedroom_3], has: [shower, tub] }
-        room hallway     { connects: [master_bed, bedroom_2, bedroom_3, full_bath] }
+        room living { area: ~40sqm }
     }
 
     roof {
         primary: gable(ridge: east-west)
-        cross_gable: over entry, pitch: 10:12
-        dormers: 2, over [bedroom_2, bedroom_3]
     }
 }
 "#;
