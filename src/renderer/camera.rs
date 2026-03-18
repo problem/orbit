@@ -70,9 +70,9 @@ impl CameraController {
     /// Create a controller sized for a building with the given diagonal.
     pub fn for_building(diagonal: f32) -> Self {
         Self {
-            yaw: std::f32::consts::FRAC_PI_4,
-            pitch: std::f32::consts::FRAC_PI_6,
-            distance: diagonal * 1.5,
+            yaw: 1.15,     // ~66° — mostly along Y, shows south facade + east gable
+            pitch: 0.40,   // ~23° — slightly elevated for 3/4 view
+            distance: diagonal * 1.8,
             is_dragging: false,
             last_mouse: None,
         }

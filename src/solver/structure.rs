@@ -35,6 +35,14 @@ pub fn generate_building_meshes(building: &SolvedBuilding) -> Vec<BuildingMesh> 
         }
     }
 
+    // Ground plane
+    let ground_size = (building.footprint_width.max(building.footprint_depth) * 1.5) as f32;
+    meshes.push(BuildingMesh {
+        mesh: MeshData::box_mesh(ground_size, ground_size, 0.02),
+        model_matrix: Matrix4::new_translation(&Vector3::new(0.0, 0.0, -0.02)),
+        color: [0.42, 0.50, 0.32], // grass green
+    });
+
     // Roof
     if let Some(ref roof) = building.roof {
         let roof_meshes = make_roof(building, roof, offset);
