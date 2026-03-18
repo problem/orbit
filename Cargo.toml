@@ -4,3 +4,41 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+# Window + event loop
+winit = "0.30"
+
+# GPU rendering
+wgpu = "24"
+
+# Math
+nalgebra = "0.33"
+
+# SQLite (bundled for portability)
+rusqlite = { version = "0.32", features = ["bundled", "blob"] }
+
+# UUIDv7
+uuid = { version = "1", features = ["v7"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Spatial index (R-tree)
+rstar = "0.12"
+
+# Time (ISO 8601)
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# Async block_on for wgpu init
+pollster = "0.4"
+
+# Zero-copy byte casting for packed BLOBs and GPU buffers
+bytemuck = { version = "1", features = ["derive"] }
