@@ -17,14 +17,19 @@ On startup, Orbit:
 
 | Key | Action |
 |-----|--------|
-| **E** | Toggle wireframe/outline mode (shows edges of all geometry) |
+| **E** | Cycle view modes: Solid → Solid+Wireframe → Wireframe Only → Solid |
+| **Escape** | Close window |
 | Mouse drag | Orbit camera |
 | Scroll | Zoom in/out |
 
 ## Troubleshooting Geometry
 
-### Wireframe Mode (press E)
-Toggle wireframe mode to see the outlines of every mesh primitive. This reveals:
+### View Modes (press E to cycle)
+- **Solid**: Normal shaded rendering (default)
+- **Solid + Wireframe**: Shaded surfaces with dark edge lines overlaid — best for spotting gaps and misaligned edges on the exterior
+- **Wireframe Only**: See-through wireframe — best for inspecting interior geometry, overlapping meshes, and hidden faces
+
+These modes reveal:
 - Missing faces (holes in the surface)
 - Overlapping geometry (z-fighting visible as flickering)
 - Misaligned edges (gaps between boxes that should snap)

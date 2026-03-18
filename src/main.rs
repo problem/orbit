@@ -244,11 +244,8 @@ impl ApplicationHandler for App {
                 if event.state == ElementState::Pressed {
                     match event.logical_key.as_ref() {
                         Key::Character("e") | Key::Character("E") => {
-                            state.render_state.wireframe_mode = !state.render_state.wireframe_mode;
-                            log::info!(
-                                "Wireframe mode: {}",
-                                if state.render_state.wireframe_mode { "ON" } else { "OFF" }
-                            );
+                            state.render_state.view_mode = state.render_state.view_mode.next();
+                            log::info!("View mode: {}", state.render_state.view_mode.label());
                             state.window.request_redraw();
                         }
                         Key::Named(NamedKey::Escape) => {

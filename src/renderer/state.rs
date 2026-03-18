@@ -6,6 +6,34 @@ use super::camera::{Camera, CameraController};
 use super::pipeline::{self, Uniforms};
 use super::scene::RenderScene;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewMode {
+    /// Normal solid rendering
+    Solid,
+    /// Solid fill + dark wireframe edges overlaid
+    SolidWireframe,
+    /// Wireframe only (see-through, inspect interior geometry)
+    WireframeOnly,
+}
+
+impl ViewMode {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Solid => Self::SolidWireframe,
+            Self::SolidWireframe => Self::WireframeOnly,
+            Self::WireframeOnly => Self::Solid,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Solid => "Solid",
+            Self::SolidWireframe => "Solid + Wireframe",
+            Self::WireframeOnly => "Wireframe Only",
+        }
+    }
+}
+
 pub struct RenderState {
     pub surface: wgpu::Surface<'static>,
     pub device: wgpu::Device,
@@ -14,7 +42,7 @@ pub struct RenderState {
     pub size: winit::dpi::PhysicalSize<u32>,
     pub render_pipeline: wgpu::RenderPipeline,
     pub wireframe_pipeline: wgpu::RenderPipeline,
-    pub wireframe_mode: bool,
+    pub view_mode: ViewMode,
     pub bind_group_layout: wgpu::BindGroupLayout,
     pub depth_texture: wgpu::Texture,
     pub depth_view: wgpu::TextureView,
@@ -95,7 +123,7 @@ impl RenderState {
             size,
             render_pipeline,
             wireframe_pipeline,
-            wireframe_mode: false,
+            view_mode: ViewMode::Solid,
             bind_group_layout,
             depth_texture,
             depth_view,
@@ -181,49 +209,57 @@ impl RenderState {
                 ..Default::default()
             });
 
-            // Pass 1: solid fill (always)
-            render_pass.set_pipeline(&self.render_pipeline);
-            for drawable in &scene.drawables {
-                render_pass.set_bind_group(0, &drawable.bind_group, &[]);
-                render_pass.set_vertex_buffer(0, drawable.gpu_mesh.vertex_buffer.slice(..));
-                render_pass.set_index_buffer(
-                    drawable.gpu_mesh.index_buffer.slice(..),
-                    wgpu::IndexFormat::Uint32,
-                );
-                render_pass.draw_indexed(0..drawable.gpu_mesh.num_indices, 0, 0..1);
-            }
-
-            // Pass 2: dark wireframe overlay (when E is toggled)
-            // Re-upload uniforms with darkened colors, then draw wireframe lines.
-            if self.wireframe_mode {
-                for drawable in &scene.drawables {
-                    let normal_mat = drawable.normal_matrix();
-                    let dark = Uniforms {
-                        view_proj: view_proj.into(),
-                        model: drawable.model_matrix.into(),
-                        normal_matrix: normal_mat.into(),
-                        base_color: [
-                            drawable.base_color[0] * 0.15,
-                            drawable.base_color[1] * 0.15,
-                            drawable.base_color[2] * 0.15,
-                            1.0,
-                        ],
-                    };
-                    self.queue.write_buffer(
-                        &drawable.uniform_buffer,
-                        0,
-                        bytemuck::cast_slice(&[dark]),
-                    );
+            match self.view_mode {
+                ViewMode::Solid => {
+                    render_pass.set_pipeline(&self.render_pipeline);
+                    for drawable in &scene.drawables {
+                        render_pass.set_bind_group(0, &drawable.bind_group, &[]);
+                        render_pass.set_vertex_buffer(0, drawable.gpu_mesh.vertex_buffer.slice(..));
+                        render_pass.set_index_buffer(drawable.gpu_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                        render_pass.draw_indexed(0..drawable.gpu_mesh.num_indices, 0, 0..1);
+                    }
                 }
-                render_pass.set_pipeline(&self.wireframe_pipeline);
-                for drawable in &scene.drawables {
-                    render_pass.set_bind_group(0, &drawable.bind_group, &[]);
-                    render_pass.set_vertex_buffer(0, drawable.gpu_mesh.vertex_buffer.slice(..));
-                    render_pass.set_index_buffer(
-                        drawable.gpu_mesh.index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint32,
-                    );
-                    render_pass.draw_indexed(0..drawable.gpu_mesh.num_indices, 0, 0..1);
+                ViewMode::SolidWireframe => {
+                    // Pass 1: solid fill
+                    render_pass.set_pipeline(&self.render_pipeline);
+                    for drawable in &scene.drawables {
+                        render_pass.set_bind_group(0, &drawable.bind_group, &[]);
+                        render_pass.set_vertex_buffer(0, drawable.gpu_mesh.vertex_buffer.slice(..));
+                        render_pass.set_index_buffer(drawable.gpu_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                        render_pass.draw_indexed(0..drawable.gpu_mesh.num_indices, 0, 0..1);
+                    }
+                    // Pass 2: dark wireframe overlay
+                    for drawable in &scene.drawables {
+                        let normal_mat = drawable.normal_matrix();
+                        let dark = Uniforms {
+                            view_proj: view_proj.into(),
+                            model: drawable.model_matrix.into(),
+                            normal_matrix: normal_mat.into(),
+                            base_color: [
+                                drawable.base_color[0] * 0.15,
+                                drawable.base_color[1] * 0.15,
+                                drawable.base_color[2] * 0.15,
+                                1.0,
+                            ],
+                        };
+                        self.queue.write_buffer(&drawable.uniform_buffer, 0, bytemuck::cast_slice(&[dark]));
+                    }
+                    render_pass.set_pipeline(&self.wireframe_pipeline);
+                    for drawable in &scene.drawables {
+                        render_pass.set_bind_group(0, &drawable.bind_group, &[]);
+                        render_pass.set_vertex_buffer(0, drawable.gpu_mesh.vertex_buffer.slice(..));
+                        render_pass.set_index_buffer(drawable.gpu_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                        render_pass.draw_indexed(0..drawable.gpu_mesh.num_indices, 0, 0..1);
+                    }
+                }
+                ViewMode::WireframeOnly => {
+                    render_pass.set_pipeline(&self.wireframe_pipeline);
+                    for drawable in &scene.drawables {
+                        render_pass.set_bind_group(0, &drawable.bind_group, &[]);
+                        render_pass.set_vertex_buffer(0, drawable.gpu_mesh.vertex_buffer.slice(..));
+                        render_pass.set_index_buffer(drawable.gpu_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                        render_pass.draw_indexed(0..drawable.gpu_mesh.num_indices, 0, 0..1);
+                    }
                 }
             }
         }
