@@ -13,12 +13,13 @@ pub struct RenderState {
     pub config: wgpu::SurfaceConfiguration,
     pub size: winit::dpi::PhysicalSize<u32>,
     pub render_pipeline: wgpu::RenderPipeline,
+    pub wireframe_pipeline: wgpu::RenderPipeline,
+    pub wireframe_mode: bool,
     pub bind_group_layout: wgpu::BindGroupLayout,
     pub depth_texture: wgpu::Texture,
     pub depth_view: wgpu::TextureView,
     pub camera: Camera,
     pub camera_controller: CameraController,
-    // Kept alive so the wgpu surface remains valid.
     _window: Arc<Window>,
 }
 
@@ -46,7 +47,7 @@ impl RenderState {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("Orbit Device"),
-                    required_features: wgpu::Features::empty(),
+                    required_features: wgpu::Features::POLYGON_MODE_LINE,
                     required_limits: wgpu::Limits::default(),
                     ..Default::default()
                 },
@@ -80,6 +81,8 @@ impl RenderState {
         let bind_group_layout = pipeline::create_bind_group_layout(&device);
         let render_pipeline =
             pipeline::create_render_pipeline(&device, surface_format, &bind_group_layout);
+        let wireframe_pipeline =
+            pipeline::create_wireframe_pipeline(&device, surface_format, &bind_group_layout);
 
         let camera = Camera::new(size.width as f32 / size.height.max(1) as f32);
         let camera_controller = CameraController::new();
@@ -91,6 +94,8 @@ impl RenderState {
             config,
             size,
             render_pipeline,
+            wireframe_pipeline,
+            wireframe_mode: false,
             bind_group_layout,
             depth_texture,
             depth_view,
@@ -177,7 +182,12 @@ impl RenderState {
                 ..Default::default()
             });
 
-            render_pass.set_pipeline(&self.render_pipeline);
+            let active_pipeline = if self.wireframe_mode {
+                &self.wireframe_pipeline
+            } else {
+                &self.render_pipeline
+            };
+            render_pass.set_pipeline(active_pipeline);
 
             // Draw each object — only bind group switch, no buffer writes during the pass
             for drawable in &scene.drawables {

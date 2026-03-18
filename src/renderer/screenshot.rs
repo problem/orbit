@@ -17,6 +17,27 @@ pub fn render_building_to_png(
     height: u32,
     output_path: &Path,
 ) -> Result<()> {
+    render_building_to_png_opts(building, camera, width, height, output_path, false)
+}
+
+pub fn render_building_to_png_wireframe(
+    building: &SolvedBuilding,
+    camera: &Camera,
+    width: u32,
+    height: u32,
+    output_path: &Path,
+) -> Result<()> {
+    render_building_to_png_opts(building, camera, width, height, output_path, true)
+}
+
+fn render_building_to_png_opts(
+    building: &SolvedBuilding,
+    camera: &Camera,
+    width: u32,
+    height: u32,
+    output_path: &Path,
+    wireframe: bool,
+) -> Result<()> {
     use crate::solver::structure::generate_building_meshes;
 
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -34,7 +55,7 @@ pub fn render_building_to_png(
     let (device, queue) = pollster::block_on(adapter.request_device(
         &wgpu::DeviceDescriptor {
             label: Some("Screenshot Device"),
-            required_features: wgpu::Features::empty(),
+            required_features: wgpu::Features::POLYGON_MODE_LINE,
             required_limits: wgpu::Limits::default(),
             ..Default::default()
         },
@@ -43,8 +64,11 @@ pub fn render_building_to_png(
 
     let texture_format = wgpu::TextureFormat::Rgba8UnormSrgb;
     let bind_group_layout = pipeline::create_bind_group_layout(&device);
-    let render_pipeline =
-        pipeline::create_render_pipeline(&device, texture_format, &bind_group_layout);
+    let render_pipeline = if wireframe {
+        pipeline::create_wireframe_pipeline(&device, texture_format, &bind_group_layout)
+    } else {
+        pipeline::create_render_pipeline(&device, texture_format, &bind_group_layout)
+    };
 
     // Create offscreen render target + depth
     let texture = device.create_texture(&wgpu::TextureDescriptor {

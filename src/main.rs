@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
@@ -167,6 +168,22 @@ impl ApplicationHandler for App {
                 log::warn!("Screenshot {} failed: {}", label, e);
             }
         }
+        // Wireframe front view for geometry QA
+        {
+            let mut cam = render_state.camera.clone();
+            let mut ctrl = CameraController::for_building(diag);
+            ctrl.yaw = 1.15;
+            ctrl.pitch = 0.40;
+            ctrl.update_camera(&mut cam);
+            let num = base_num + views.len() as u32;
+            let date = chrono::Local::now().format("%Y-%m-%d");
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("screenshots")
+                .join(format!("{:03}_{}_wireframe.png", num, date));
+            let _ = orbit::renderer::screenshot::render_building_to_png_wireframe(
+                &building, &cam, 1920, 1080, &path,
+            );
+        }
 
         self.state = Some(AppState {
             window,
@@ -222,6 +239,18 @@ impl ApplicationHandler for App {
                 };
                 state.render_state.camera_controller.on_scroll(scroll);
                 state.window.request_redraw();
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                if event.state == ElementState::Pressed {
+                    if let PhysicalKey::Code(KeyCode::KeyE) = event.physical_key {
+                        state.render_state.wireframe_mode = !state.render_state.wireframe_mode;
+                        log::info!(
+                            "Wireframe mode: {}",
+                            if state.render_state.wireframe_mode { "ON" } else { "OFF" }
+                        );
+                        state.window.request_redraw();
+                    }
+                }
             }
             WindowEvent::RedrawRequested => {
                 match state.render_state.render(&state.scene) {

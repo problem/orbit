@@ -51,6 +51,23 @@ pub fn create_render_pipeline(
     format: wgpu::TextureFormat,
     bind_group_layout: &wgpu::BindGroupLayout,
 ) -> wgpu::RenderPipeline {
+    create_pipeline_with_mode(device, format, bind_group_layout, wgpu::PolygonMode::Fill)
+}
+
+pub fn create_wireframe_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    bind_group_layout: &wgpu::BindGroupLayout,
+) -> wgpu::RenderPipeline {
+    create_pipeline_with_mode(device, format, bind_group_layout, wgpu::PolygonMode::Line)
+}
+
+fn create_pipeline_with_mode(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    bind_group_layout: &wgpu::BindGroupLayout,
+    polygon_mode: wgpu::PolygonMode,
+) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Basic Shader"),
         source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/basic.wgsl").into()),
@@ -86,7 +103,7 @@ pub fn create_render_pipeline(
             strip_index_format: None,
             front_face: wgpu::FrontFace::Ccw,
             cull_mode: None, // disabled — render all faces from all angles
-            polygon_mode: wgpu::PolygonMode::Fill,
+            polygon_mode,
             unclipped_depth: false,
             conservative: false,
         },
