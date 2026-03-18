@@ -96,6 +96,67 @@ pub fn generate_building_meshes(building: &SolvedBuilding) -> Vec<BuildingMesh> 
 }
 
 /// Create a box with w=X-width, d=Y-depth, h=Z-height centered at (cx,cy,cz).
+/// Generate black edge outline geometry for all building boxes.
+pub fn generate_edge_meshes(building: &SolvedBuilding) -> Vec<BuildingMesh> {
+    let mut edges = Vec::new();
+    let fw = building.footprint_width as f32;
+    let fd = building.footprint_depth as f32;
+    let ext = building.style.exterior_wall_thickness as f32;
+    let slab_t = building.style.floor_thickness as f32;
+    let ox = -fw / 2.0;
+    let oy = -fd / 2.0;
+    let t = 0.03; // edge strip thickness in meters
+    let black = [0.0, 0.0, 0.0];
+
+    for floor in &building.floors {
+        let z = floor.elevation as f32;
+        let h = floor.ceiling_height as f32;
+
+        // Foundation slab edges
+        edges.extend(box_edges(fw, fd, slab_t, ox + fw/2.0, oy + fd/2.0, z - slab_t/2.0, t, black));
+        // South wall
+        edges.extend(box_edges(fw, ext, h, ox + fw/2.0, oy + ext/2.0, z + h/2.0, t, black));
+        // North wall
+        edges.extend(box_edges(fw, ext, h, ox + fw/2.0, oy + fd - ext/2.0, z + h/2.0, t, black));
+        // West wall
+        edges.extend(box_edges(ext, fd - 2.0*ext, h, ox + ext/2.0, oy + fd/2.0, z + h/2.0, t, black));
+        // East wall
+        edges.extend(box_edges(ext, fd - 2.0*ext, h, ox + fw - ext/2.0, oy + fd/2.0, z + h/2.0, t, black));
+        // Ceiling
+        edges.extend(box_edges(fw, fd, slab_t, ox + fw/2.0, oy + fd/2.0, z + h + slab_t/2.0, t, black));
+    }
+
+    edges
+}
+
+/// Generate 12 edge strips for a box (w=X, d=Y, h=Z) centered at (cx,cy,cz).
+fn box_edges(w: f32, d: f32, h: f32, cx: f32, cy: f32, cz: f32, t: f32, color: [f32; 3]) -> Vec<BuildingMesh> {
+    let hw = w / 2.0;
+    let hd = d / 2.0;
+    let hh = h / 2.0;
+    let mut edges = Vec::new();
+
+    // 4 edges along X
+    for &dy in &[-hd, hd] {
+        for &dz in &[-hh, hh] {
+            edges.push(make_box(w + t, t, t, cx, cy + dy, cz + dz, color));
+        }
+    }
+    // 4 edges along Y
+    for &dx in &[-hw, hw] {
+        for &dz in &[-hh, hh] {
+            edges.push(make_box(t, d + t, t, cx + dx, cy, cz + dz, color));
+        }
+    }
+    // 4 edges along Z
+    for &dx in &[-hw, hw] {
+        for &dy in &[-hd, hd] {
+            edges.push(make_box(t, t, h + t, cx + dx, cy + dy, cz, color));
+        }
+    }
+    edges
+}
+
 fn make_box(w: f32, d: f32, h: f32, cx: f32, cy: f32, cz: f32, color: [f32; 3]) -> BuildingMesh {
     // box_mesh params: (width=X, height=Z, depth=Y)
     BuildingMesh {

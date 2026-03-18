@@ -59,12 +59,15 @@ impl DrawableMesh {
 /// The set of objects to render.
 pub struct RenderScene {
     pub drawables: Vec<DrawableMesh>,
+    /// Black edge outlines for wireframe overlay mode.
+    pub edge_drawables: Vec<DrawableMesh>,
 }
 
 impl RenderScene {
     pub fn new() -> Self {
         Self {
             drawables: Vec::new(),
+            edge_drawables: Vec::new(),
         }
     }
 
@@ -115,7 +118,7 @@ impl RenderScene {
         device: &wgpu::Device,
         bind_group_layout: &wgpu::BindGroupLayout,
     ) -> Self {
-        use crate::solver::structure::generate_building_meshes;
+        use crate::solver::structure::{generate_building_meshes, generate_edge_meshes};
 
         let mut scene = Self::new();
         let building_meshes = generate_building_meshes(building);
@@ -127,6 +130,18 @@ impl RenderScene {
                 &bm.mesh,
                 bm.model_matrix,
                 bm.color,
+            ));
+        }
+
+        // Generate black edge outlines for wireframe overlay
+        let edge_meshes = generate_edge_meshes(building);
+        for em in &edge_meshes {
+            scene.edge_drawables.push(DrawableMesh::new(
+                device,
+                bind_group_layout,
+                &em.mesh,
+                em.model_matrix,
+                em.color,
             ));
         }
 
