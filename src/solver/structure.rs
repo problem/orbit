@@ -35,6 +35,12 @@ pub fn generate_building_meshes(building: &SolvedBuilding) -> Vec<BuildingMesh> 
         }
     }
 
+    // Roof
+    if let Some(ref roof) = building.roof {
+        let roof_meshes = make_roof(building, roof, offset);
+        meshes.extend(roof_meshes);
+    }
+
     meshes
 }
 
@@ -177,6 +183,214 @@ fn segments_overlap(
         return a_min < b_max - tol && b_min < a_max - tol;
     }
     false
+}
+
+/// Generate roof meshes. For a gable roof: two sloped rectangular planes + two triangular gable ends.
+fn make_roof(
+    building: &SolvedBuilding,
+    roof: &SolvedRoof,
+    offset: Vector3<f32>,
+) -> Vec<BuildingMesh> {
+    let mut meshes = Vec::new();
+
+    // Roof sits on top of the highest floor
+    let top_floor = match building.floors.last() {
+        Some(f) => f,
+        None => return meshes,
+    };
+    let base_z = (top_floor.elevation + top_floor.ceiling_height) as f32;
+
+    let fw = building.footprint_width as f32;
+    let fd = building.footprint_depth as f32;
+    let overhang = building.style.roof_overhang as f32;
+    let pitch = roof.pitch_ratio as f32;
+
+    match roof.form {
+        crate::oil::types::RoofForm::Gable => {
+            if roof.ridge_along_x {
+                // Ridge runs along X (east-west). Slopes face north and south.
+                // Ridge height = pitch * (depth/2)
+                let half_span = fd / 2.0;
+                let ridge_height = pitch * half_span;
+
+                // Two sloped roof planes
+                let roof_planes = make_gable_roof_planes(
+                    fw, fd, ridge_height, base_z, overhang, true, offset,
+                    building.style.roof_color,
+                );
+                meshes.extend(roof_planes);
+
+                // Two triangular gable walls (east and west ends)
+                meshes.push(make_gable_wall(
+                    0.0, fd / 2.0, base_z, half_span, ridge_height, true,
+                    true, offset, building.style.exterior_color,
+                ));
+                meshes.push(make_gable_wall(
+                    fw, fd / 2.0, base_z, half_span, ridge_height, true,
+                    false, offset, building.style.exterior_color,
+                ));
+            } else {
+                // Ridge runs along Y (north-south). Slopes face east and west.
+                let half_span = fw / 2.0;
+                let ridge_height = pitch * half_span;
+
+                let roof_planes = make_gable_roof_planes(
+                    fw, fd, ridge_height, base_z, overhang, false, offset,
+                    building.style.roof_color,
+                );
+                meshes.extend(roof_planes);
+
+                // Gable walls (north and south ends)
+                meshes.push(make_gable_wall(
+                    fw / 2.0, 0.0, base_z, half_span, ridge_height, false,
+                    true, offset, building.style.exterior_color,
+                ));
+                meshes.push(make_gable_wall(
+                    fw / 2.0, fd, base_z, half_span, ridge_height, false,
+                    false, offset, building.style.exterior_color,
+                ));
+            }
+        }
+        _ => {
+            // Other roof forms: generate a flat "cap" as placeholder
+            let cap = MeshData::box_mesh(fw + overhang * 2.0, fd + overhang * 2.0, 0.1);
+            meshes.push(BuildingMesh {
+                mesh: cap,
+                model_matrix: Matrix4::new_translation(&Vector3::new(
+                    offset.x + fw / 2.0,
+                    offset.y + fd / 2.0,
+                    base_z + 0.05,
+                )),
+                color: building.style.roof_color,
+            });
+        }
+    }
+
+    meshes
+}
+
+/// Generate two sloped rectangular planes for a gable roof.
+fn make_gable_roof_planes(
+    fw: f32, fd: f32, ridge_height: f32, base_z: f32,
+    overhang: f32, ridge_along_x: bool, offset: Vector3<f32>,
+    color: [f32; 3],
+) -> Vec<BuildingMesh> {
+    let mut meshes = Vec::new();
+
+    if ridge_along_x {
+        // Ridge along X. Two planes slope from ridge down to eaves (north and south).
+        let half_d = fd / 2.0;
+        let slope_len = (half_d * half_d + ridge_height * ridge_height).sqrt();
+        let ovh = overhang;
+
+        // South slope: from ridge (y=fd/2, z=base+ridge_h) down to eave (y=0, z=base)
+        // North slope: mirror
+        for side in [-1.0f32, 1.0] {
+            let mesh = make_sloped_quad(
+                fw + 2.0 * ovh, slope_len + ovh,
+            );
+            // Position: centered on footprint X, at midpoint of slope Y, at midpoint of slope Z
+            let mid_y = fd / 2.0 + side * half_d / 2.0;
+            let mid_z = base_z + ridge_height / 2.0;
+            // Rotation: tilt around X axis
+            let angle = (ridge_height / half_d).atan() * side;
+            let rot = nalgebra::UnitQuaternion::from_axis_angle(
+                &nalgebra::Vector3::x_axis(), angle,
+            );
+            let model = Matrix4::new_translation(&Vector3::new(
+                offset.x + fw / 2.0,
+                offset.y + mid_y,
+                mid_z,
+            )) * rot.to_homogeneous();
+
+            meshes.push(BuildingMesh {
+                mesh,
+                model_matrix: model,
+                color,
+            });
+        }
+    } else {
+        // Ridge along Y. Two planes slope east and west.
+        let half_w = fw / 2.0;
+        let slope_len = (half_w * half_w + ridge_height * ridge_height).sqrt();
+        let ovh = overhang;
+
+        for side in [-1.0f32, 1.0] {
+            let mesh = make_sloped_quad(
+                slope_len + ovh, fd + 2.0 * ovh,
+            );
+            let mid_x = fw / 2.0 + side * half_w / 2.0;
+            let mid_z = base_z + ridge_height / 2.0;
+            let angle = -(ridge_height / half_w).atan() * side;
+            let rot = nalgebra::UnitQuaternion::from_axis_angle(
+                &nalgebra::Vector3::y_axis(), angle,
+            );
+            let model = Matrix4::new_translation(&Vector3::new(
+                offset.x + mid_x,
+                offset.y + fd / 2.0,
+                mid_z,
+            )) * rot.to_homogeneous();
+
+            meshes.push(BuildingMesh {
+                mesh,
+                model_matrix: model,
+                color,
+            });
+        }
+    }
+
+    meshes
+}
+
+/// Generate a flat quad (thin box) for a roof plane.
+fn make_sloped_quad(width: f32, depth: f32) -> MeshData {
+    MeshData::box_mesh(width, depth, 0.05)
+}
+
+/// Generate a triangular gable wall to fill the triangle above the rectangular wall.
+fn make_gable_wall(
+    x: f32, y: f32, base_z: f32, half_span: f32, ridge_height: f32,
+    ridge_along_x: bool, is_near_side: bool,
+    offset: Vector3<f32>, color: [f32; 3],
+) -> BuildingMesh {
+    // Triangle vertices: base-left, base-right, apex
+    let (positions, normals) = if ridge_along_x {
+        // Gable on east or west face (YZ plane)
+        let normal_dir = if is_near_side { -1.0f32 } else { 1.0 };
+        let bl = [offset.x + x, offset.y + y - half_span, base_z];
+        let br = [offset.x + x, offset.y + y + half_span, base_z];
+        let apex = [offset.x + x, offset.y + y, base_z + ridge_height];
+        let n = [normal_dir, 0.0, 0.0];
+        // Two triangles (front and back face)
+        (
+            vec![bl, br, apex, apex, br, bl],
+            vec![n, n, n, [-n[0], 0.0, 0.0], [-n[0], 0.0, 0.0], [-n[0], 0.0, 0.0]],
+        )
+    } else {
+        // Gable on north or south face (XZ plane)
+        let normal_dir = if is_near_side { -1.0f32 } else { 1.0 };
+        let bl = [offset.x + x - half_span, offset.y + y, base_z];
+        let br = [offset.x + x + half_span, offset.y + y, base_z];
+        let apex = [offset.x + x, offset.y + y, base_z + ridge_height];
+        let n = [0.0, normal_dir, 0.0];
+        (
+            vec![bl, br, apex, apex, br, bl],
+            vec![n, n, n, [0.0, -n[1], 0.0], [0.0, -n[1], 0.0], [0.0, -n[1], 0.0]],
+        )
+    };
+
+    let indices = vec![0, 1, 2, 3, 4, 5];
+
+    BuildingMesh {
+        mesh: MeshData {
+            positions,
+            normals,
+            indices,
+            edges: None,
+        },
+        model_matrix: Matrix4::identity(),
+        color,
+    }
 }
 
 fn make_wall(

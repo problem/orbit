@@ -17,6 +17,7 @@ pub fn solve(program: &Program) -> Result<SolvedBuilding> {
 
     let resolved_style = style::resolve_style(house);
     let (fp_width, fp_depth) = style::resolve_footprint(house);
+    let roof = style::resolve_roof(house);
 
     let mut floors = Vec::new();
     let mut elevation = 0.0;
@@ -76,8 +77,16 @@ pub fn solve(program: &Program) -> Result<SolvedBuilding> {
         elevation += ceiling_height + resolved_style.floor_thickness;
     }
 
+    if let Some(ref r) = roof {
+        log::info!(
+            "  solver: roof {:?}, ridge_along_x={}, pitch={:.2}",
+            r.form, r.ridge_along_x, r.pitch_ratio
+        );
+    }
+
     Ok(SolvedBuilding {
         floors,
+        roof,
         style: resolved_style,
         footprint_width: fp_width,
         footprint_depth: fp_depth,

@@ -1,6 +1,7 @@
 use crate::oil::ast::*;
 use crate::oil::types::*;
 use super::types::*;
+use crate::oil::types::RoofForm;
 
 /// Resolve style defaults from the AST.
 pub fn resolve_style(house: &HouseBlock) -> ResolvedStyle {
@@ -20,6 +21,8 @@ pub fn resolve_style(house: &HouseBlock) -> ResolvedStyle {
         exterior_color: [0.93, 0.90, 0.83],   // cream stucco
         interior_wall_color: [0.95, 0.95, 0.93], // off-white
         floor_color: [0.45, 0.35, 0.25],       // dark wood
+        roof_color: [0.35, 0.28, 0.22],        // dark slate/shingle
+        roof_overhang: 0.4,                     // 400mm overhang
     };
 
     // Apply style overrides
@@ -130,6 +133,41 @@ pub fn resolve_rooms(floor: &FloorBlock, _style: &ResolvedStyle) -> Vec<Resolved
             }
         })
         .collect()
+}
+
+/// Resolve roof specification from the AST.
+pub fn resolve_roof(house: &HouseBlock) -> Option<SolvedRoof> {
+    let roof_block = house.roof.as_ref()?;
+
+    let (form, ridge_along_x) = match &roof_block.primary {
+        Some(primary) => {
+            let ridge_along_x = primary.params.iter().any(|(k, v)| {
+                k == "ridge" && (v.contains("east") || v.contains("west"))
+            });
+            (primary.form.clone(), ridge_along_x)
+        }
+        None => (RoofForm::Gable, true), // default: gable with east-west ridge
+    };
+
+    let pitch_ratio = match &roof_block.pitch {
+        Some(p) => {
+            if p.run > 0.0 { p.rise / p.run } else { 0.5 }
+        }
+        None => {
+            // Try style overrides for pitch
+            house.style.as_ref()
+                .and_then(|s| s.overrides.iter().find(|p| p.key == "roof_pitch"))
+                .and_then(|p| match &p.value {
+                    StyleValue::Pitch(pitch) => {
+                        if pitch.run > 0.0 { Some(pitch.rise / pitch.run) } else { None }
+                    }
+                    _ => None,
+                })
+                .unwrap_or(0.5) // default 6:12
+        }
+    };
+
+    Some(SolvedRoof { form, ridge_along_x, pitch_ratio })
 }
 
 fn material_to_color(material_type: &str, color: Option<&str>) -> [f32; 3] {

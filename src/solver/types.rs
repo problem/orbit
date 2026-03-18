@@ -1,5 +1,5 @@
 use crate::oil::ast::WindowSpec;
-use crate::oil::types::{Cardinal, Feature, RoomType};
+use crate::oil::types::{Cardinal, Feature, RoofForm, RoomType};
 
 /// Style defaults resolved from the style block.
 #[derive(Debug, Clone)]
@@ -12,6 +12,8 @@ pub struct ResolvedStyle {
     pub exterior_color: [f32; 3],
     pub interior_wall_color: [f32; 3],
     pub floor_color: [f32; 3],
+    pub roof_color: [f32; 3],
+    pub roof_overhang: f64,
 }
 
 /// A resolved room with concrete numeric targets (all in meters).
@@ -50,9 +52,20 @@ pub struct SolvedFloor {
     pub rooms: Vec<SolvedRoom>,
 }
 
+/// Resolved roof specification.
+#[derive(Debug, Clone)]
+pub struct SolvedRoof {
+    pub form: RoofForm,
+    /// Ridge runs along this axis: "east-west" means ridge along X, "north-south" along Y.
+    pub ridge_along_x: bool,
+    /// Pitch as rise/run ratio (e.g. 12:12 = 1.0, 10:12 = 0.833).
+    pub pitch_ratio: f64,
+}
+
 /// The solver's final output.
 pub struct SolvedBuilding {
     pub floors: Vec<SolvedFloor>,
+    pub roof: Option<SolvedRoof>,
     pub style: ResolvedStyle,
     pub footprint_width: f64,
     pub footprint_depth: f64,
