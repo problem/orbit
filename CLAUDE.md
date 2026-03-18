@@ -58,3 +58,5 @@ OIL text → Parser (src/oil/) → AST → Solver (src/solver/) → 3D Geometry 
 
 ### Screenshot QA
 Every `cargo run` exports 4 screenshots from different angles. All 4 must look correct — a bug visible from only one angle is still a bug. Check `screenshots/` for the latest set.
+
+**IMPORTANT: Do NOT delete screenshots unless explicitly asked by the user.** The screenshot archive is a visual progress log. Old screenshots are valuable for comparing before/after.
