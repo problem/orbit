@@ -228,21 +228,16 @@ impl RenderState {
                         render_pass.set_index_buffer(drawable.gpu_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                         render_pass.draw_indexed(0..drawable.gpu_mesh.num_indices, 0, 0..1);
                     }
-                    // Pass 2: dark wireframe overlay
+                    // Pass 2: flat-color wireframe overlay (alpha < 1.0 triggers unlit mode in shader)
                     for drawable in &scene.drawables {
                         let normal_mat = drawable.normal_matrix();
-                        let dark = Uniforms {
+                        let wire_color = Uniforms {
                             view_proj: view_proj.into(),
                             model: drawable.model_matrix.into(),
                             normal_matrix: normal_mat.into(),
-                            base_color: [
-                                drawable.base_color[0] * 0.15,
-                                drawable.base_color[1] * 0.15,
-                                drawable.base_color[2] * 0.15,
-                                1.0,
-                            ],
+                            base_color: [0.0, 0.0, 0.0, 0.5], // flat black, alpha < 1 = unlit
                         };
-                        self.queue.write_buffer(&drawable.uniform_buffer, 0, bytemuck::cast_slice(&[dark]));
+                        self.queue.write_buffer(&drawable.uniform_buffer, 0, bytemuck::cast_slice(&[wire_color]));
                     }
                     render_pass.set_pipeline(&self.wireframe_pipeline);
                     for drawable in &scene.drawables {

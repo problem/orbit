@@ -31,11 +31,15 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    // When alpha < 1.0, output flat unlit color (used for wireframe overlay)
+    if uniforms.base_color.a < 0.99 {
+        return vec4<f32>(uniforms.base_color.rgb, 1.0);
+    }
     // Simple directional lighting
     let sun_dir = normalize(vec3<f32>(0.5, 0.8, 1.0));
     let ambient = 0.15;
     let diffuse = max(dot(in.world_normal, sun_dir), 0.0);
     let light = ambient + diffuse * 0.85;
     let color = uniforms.base_color.rgb * light;
-    return vec4<f32>(color, uniforms.base_color.a);
+    return vec4<f32>(color, 1.0);
 }
