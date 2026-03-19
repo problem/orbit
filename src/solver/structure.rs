@@ -447,21 +447,16 @@ pub fn generate_edge_meshes(building: &SolvedBuilding) -> Vec<BuildingMesh> {
             let ridge_cy = oy + fd / 2.0;
             let rz = base_z + ridge_h;
 
-            // Ridge line
+            // Ridge line (axis-aligned along X)
             edges.push(line_edge([x0, ridge_cy, rz], [x1, ridge_cy, rz], t, black));
-            // South eave
+            // South eave (axis-aligned along X)
             edges.push(line_edge([x0, eave_s, base_z], [x1, eave_s, base_z], t, black));
-            // North eave
+            // North eave (axis-aligned along X)
             edges.push(line_edge([x0, eave_n, base_z], [x1, eave_n, base_z], t, black));
-            // West gable slopes
-            edges.push(line_edge([x0, eave_s, base_z], [x0, ridge_cy, rz], t, black));
-            edges.push(line_edge([x0, eave_n, base_z], [x0, ridge_cy, rz], t, black));
-            // East gable slopes
-            edges.push(line_edge([x1, eave_s, base_z], [x1, ridge_cy, rz], t, black));
-            edges.push(line_edge([x1, eave_n, base_z], [x1, ridge_cy, rz], t, black));
-            // Gable base lines (bottom of gable triangles)
+            // Gable base lines (axis-aligned along Y)
             edges.push(line_edge([x0, eave_s, base_z], [x0, eave_n, base_z], t, black));
             edges.push(line_edge([x1, eave_s, base_z], [x1, eave_n, base_z], t, black));
+            // Gable slope edges are diagonal — skip (line_edge only works for axis-aligned)
         } else {
             let half_span = fw / 2.0;
             let ridge_h = pitch * half_span;
@@ -475,10 +470,6 @@ pub fn generate_edge_meshes(building: &SolvedBuilding) -> Vec<BuildingMesh> {
             edges.push(line_edge([ridge_cx, y0, rz], [ridge_cx, y1, rz], t, black));
             edges.push(line_edge([eave_w, y0, base_z], [eave_w, y1, base_z], t, black));
             edges.push(line_edge([eave_e, y0, base_z], [eave_e, y1, base_z], t, black));
-            edges.push(line_edge([eave_w, y0, base_z], [ridge_cx, y0, rz], t, black));
-            edges.push(line_edge([eave_e, y0, base_z], [ridge_cx, y0, rz], t, black));
-            edges.push(line_edge([eave_w, y1, base_z], [ridge_cx, y1, rz], t, black));
-            edges.push(line_edge([eave_e, y1, base_z], [ridge_cx, y1, rz], t, black));
             edges.push(line_edge([eave_w, y0, base_z], [eave_e, y0, base_z], t, black));
             edges.push(line_edge([eave_w, y1, base_z], [eave_e, y1, base_z], t, black));
         }
