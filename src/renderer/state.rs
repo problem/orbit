@@ -204,14 +204,17 @@ impl RenderState {
         let view_proj = self.camera.view_projection_matrix();
 
         // Upload uniforms
+        // no_shadow meshes get a huge offset so shadow UV is always outside [0,1]
+        let no_shadow_mat = nalgebra::Matrix4::new_translation(&nalgebra::Vector3::new(1000.0, 1000.0, 1000.0));
         for drawable in &scene.drawables {
             let normal_mat = drawable.normal_matrix();
+            let lvp = if drawable.no_shadow { no_shadow_mat } else { *light_vp };
             let uniforms = Uniforms {
                 view_proj: view_proj.into(),
                 model: drawable.model_matrix.into(),
                 normal_matrix: normal_mat.into(),
                 base_color: [drawable.base_color[0], drawable.base_color[1], drawable.base_color[2], 1.0],
-                light_view_proj: (*light_vp).into(),
+                light_view_proj: lvp.into(),
             };
             self.queue.write_buffer(&drawable.uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
         }
@@ -250,6 +253,7 @@ impl RenderState {
             });
             shadow_pass.set_pipeline(&self.shadow_pipeline);
             for drawable in &scene.drawables {
+                if drawable.no_shadow { continue; } // skip thin quads that cause shadow acne
                 shadow_pass.set_bind_group(0, &drawable.bind_group, &[]);
                 shadow_pass.set_vertex_buffer(0, drawable.gpu_mesh.vertex_buffer.slice(..));
                 shadow_pass.set_index_buffer(drawable.gpu_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);

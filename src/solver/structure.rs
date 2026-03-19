@@ -8,6 +8,8 @@ pub struct BuildingMesh {
     pub mesh: MeshData,
     pub model_matrix: Matrix4<f32>,
     pub color: [f32; 3],
+    /// If true, skip this mesh in the shadow pass (prevents self-shadow acne on thin quads)
+    pub no_shadow: bool,
 }
 
 // Window/door dimensions
@@ -74,8 +76,10 @@ pub fn generate_building_meshes(building: &SolvedBuilding) -> Vec<BuildingMesh> 
             WallFace::East, &openings, building.style.exterior_color,
         ));
 
-        // Ceiling
-        meshes.push(make_box(fw, fd, slab_t, ox + fw/2.0, oy + fd/2.0, z + h + slab_t/2.0, [0.92, 0.90, 0.85]));
+        // Ceiling (no_shadow to prevent shadowing the roof from below)
+        let mut ceiling = make_box(fw, fd, slab_t, ox + fw/2.0, oy + fd/2.0, z + h + slab_t/2.0, [0.92, 0.90, 0.85]);
+        ceiling.no_shadow = true;
+        meshes.push(ceiling);
 
         // Interior walls
         meshes.extend(generate_interior_walls(&floor.rooms, fw, fd, ext, int_t, h, z, ox, oy, building.style.interior_wall_color));
@@ -494,6 +498,7 @@ fn make_box(w: f32, d: f32, h: f32, cx: f32, cy: f32, cz: f32, color: [f32; 3]) 
         mesh: MeshData::box_mesh(w, h, d),
         model_matrix: Matrix4::new_translation(&Vector3::new(cx, cy, cz)),
         color,
+        no_shadow: false,
     }
 }
 
@@ -505,61 +510,120 @@ fn make_gable_roof(
     roof_color: [f32; 3], wall_color: [f32; 3],
 ) -> Vec<BuildingMesh> {
     let mut out = Vec::new();
+    let fascia_h = 0.2;    // fascia board height
+    let fascia_t = 0.03;   // fascia board thickness
+    let ridge_w = 0.15;    // ridge cap width
+    let ridge_h = 0.08;    // ridge cap height above slope
+    let soffit_t = 0.03;   // soffit panel thickness
+    let trim_color = [0.30, 0.25, 0.20]; // dark wood trim
+
     if ridge_along_x {
         let half_span = fd / 2.0;
-        let ridge_h = pitch * half_span;
+        let rh = pitch * half_span;
         let ridge_cy = oy + fd / 2.0;
         let x0 = ox - overhang;
         let x1 = ox + fw + overhang;
         let eave_s = oy - overhang;
         let eave_n = oy + fd + overhang;
-        let rz = base_z + ridge_h;
+        let rz = base_z + rh;
+        let roof_len = x1 - x0;
 
         let slope_dy = half_span + overhang;
-        let slope_dz = ridge_h;
+        let slope_dz = rh;
         let slen = (slope_dy * slope_dy + slope_dz * slope_dz).sqrt();
         let sn_y = -slope_dz / slen;
         let sn_z = slope_dy / slen;
 
+        // Roof slope surfaces
         out.push(make_quad([x0, eave_s, base_z], [x1, eave_s, base_z], [x1, ridge_cy, rz], [x0, ridge_cy, rz], [0.0, sn_y, sn_z], roof_color));
         out.push(make_quad([x0, ridge_cy, rz], [x1, ridge_cy, rz], [x1, eave_n, base_z], [x0, eave_n, base_z], [0.0, -sn_y, sn_z], roof_color));
+
+        // Gable end walls
         for &x in &[x0, x1] {
             let nx = if x < ox + fw / 2.0 { -1.0 } else { 1.0 };
             out.push(make_triangle([x, eave_s, base_z], [x, eave_n, base_z], [x, ridge_cy, rz], [nx, 0.0, 0.0], wall_color));
         }
+
+        // Ridge cap (box running along ridge)
+        let mid_x = (x0 + x1) / 2.0;
+        out.push(make_box(roof_len, ridge_w, ridge_h, mid_x, ridge_cy, rz + ridge_h / 2.0, trim_color));
+
+        // Fascia boards along eaves (vertical boards at eave edge)
+        out.push(make_box(roof_len, fascia_t, fascia_h, mid_x, eave_s, base_z - fascia_h / 2.0, trim_color));
+        out.push(make_box(roof_len, fascia_t, fascia_h, mid_x, eave_n, base_z - fascia_h / 2.0, trim_color));
+
+        // Soffit panels (horizontal under overhang, from wall face to eave)
+        let soffit_south_d = oy - eave_s; // overhang depth on south side
+        if soffit_south_d > 0.01 {
+            let soffit_cy = (oy + eave_s) / 2.0;
+            out.push(make_box(roof_len, soffit_south_d, soffit_t, mid_x, soffit_cy, base_z - fascia_h, trim_color));
+        }
+        let soffit_north_d = eave_n - (oy + fd);
+        if soffit_north_d > 0.01 {
+            let soffit_cy = (oy + fd + eave_n) / 2.0;
+            out.push(make_box(roof_len, soffit_north_d, soffit_t, mid_x, soffit_cy, base_z - fascia_h, trim_color));
+        }
+
+        // Rake boards along gable edges (vertical boards at gable ends)
+        // These are at x0 and x1, running vertically from eave to near-ridge
+        out.push(make_box(fascia_t, fascia_t, rh + fascia_h, x0, ridge_cy, base_z + rh / 2.0 - fascia_h / 2.0, trim_color));
+        out.push(make_box(fascia_t, fascia_t, rh + fascia_h, x1, ridge_cy, base_z + rh / 2.0 - fascia_h / 2.0, trim_color));
     } else {
         let half_span = fw / 2.0;
-        let ridge_h = pitch * half_span;
+        let rh = pitch * half_span;
         let ridge_cx = ox + fw / 2.0;
         let y0 = oy - overhang;
         let y1 = oy + fd + overhang;
         let eave_w = ox - overhang;
         let eave_e = ox + fw + overhang;
-        let rz = base_z + ridge_h;
+        let rz = base_z + rh;
+        let roof_len = y1 - y0;
 
         let slope_dx = half_span + overhang;
-        let slope_dz = ridge_h;
+        let slope_dz = rh;
         let slen = (slope_dx * slope_dx + slope_dz * slope_dz).sqrt();
         let sn_x = -slope_dz / slen;
         let sn_z = slope_dx / slen;
 
         out.push(make_quad([eave_w, y0, base_z], [eave_w, y1, base_z], [ridge_cx, y1, rz], [ridge_cx, y0, rz], [sn_x, 0.0, sn_z], roof_color));
         out.push(make_quad([ridge_cx, y0, rz], [ridge_cx, y1, rz], [eave_e, y1, base_z], [eave_e, y0, base_z], [-sn_x, 0.0, sn_z], roof_color));
+
         for &y in &[y0, y1] {
             let ny = if y < oy + fd / 2.0 { -1.0 } else { 1.0 };
             out.push(make_triangle([eave_w, y, base_z], [eave_e, y, base_z], [ridge_cx, y, rz], [0.0, ny, 0.0], wall_color));
         }
+
+        let mid_y = (y0 + y1) / 2.0;
+        out.push(make_box(ridge_w, roof_len, ridge_h, ridge_cx, mid_y, rz + ridge_h / 2.0, trim_color));
+        out.push(make_box(fascia_t, roof_len, fascia_h, eave_w, mid_y, base_z - fascia_h / 2.0, trim_color));
+        out.push(make_box(fascia_t, roof_len, fascia_h, eave_e, mid_y, base_z - fascia_h / 2.0, trim_color));
+
+        let soffit_west_d = ox - eave_w;
+        if soffit_west_d > 0.01 {
+            let soffit_cx = (ox + eave_w) / 2.0;
+            out.push(make_box(soffit_west_d, roof_len, soffit_t, soffit_cx, mid_y, base_z - fascia_h, trim_color));
+        }
+        let soffit_east_d = eave_e - (ox + fw);
+        if soffit_east_d > 0.01 {
+            let soffit_cx = (ox + fw + eave_e) / 2.0;
+            out.push(make_box(soffit_east_d, roof_len, soffit_t, soffit_cx, mid_y, base_z - fascia_h, trim_color));
+        }
+
+        out.push(make_box(fascia_t, fascia_t, rh + fascia_h, ridge_cx, y0, base_z + rh / 2.0 - fascia_h / 2.0, trim_color));
+        out.push(make_box(fascia_t, fascia_t, rh + fascia_h, ridge_cx, y1, base_z + rh / 2.0 - fascia_h / 2.0, trim_color));
     }
     out
 }
 
 fn make_quad(a: [f32; 3], b: [f32; 3], c: [f32; 3], d: [f32; 3], normal: [f32; 3], color: [f32; 3]) -> BuildingMesh {
-    let back = [-normal[0], -normal[1], -normal[2]];
+    // Single-sided quad. cull_mode: None renders both winding orders.
+    // Duplicate back-face vertices caused z-fighting checkerboard artifacts.
     BuildingMesh {
+        no_shadow: true,
         mesh: MeshData {
-            positions: vec![a, b, c, d, d, c, b, a],
-            normals: vec![normal, normal, normal, normal, back, back, back, back],
-            indices: vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7],
+            positions: vec![a, b, c, d],
+            normals: vec![normal, normal, normal, normal],
+            indices: vec![0, 1, 2, 0, 2, 3],
             edges: None,
         },
         model_matrix: Matrix4::identity(),
@@ -568,12 +632,13 @@ fn make_quad(a: [f32; 3], b: [f32; 3], c: [f32; 3], d: [f32; 3], normal: [f32; 3
 }
 
 fn make_triangle(a: [f32; 3], b: [f32; 3], c: [f32; 3], normal: [f32; 3], color: [f32; 3]) -> BuildingMesh {
-    let back = [-normal[0], -normal[1], -normal[2]];
+    // Single-sided triangle. cull_mode: None handles back-face visibility.
     BuildingMesh {
+        no_shadow: true,
         mesh: MeshData {
-            positions: vec![a, b, c, c, b, a],
-            normals: vec![normal, normal, normal, back, back, back],
-            indices: vec![0, 1, 2, 3, 4, 5],
+            positions: vec![a, b, c],
+            normals: vec![normal, normal, normal],
+            indices: vec![0, 1, 2],
             edges: None,
         },
         model_matrix: Matrix4::identity(),

@@ -11,6 +11,7 @@ pub struct DrawableMesh {
     pub gpu_mesh: GpuMesh,
     pub model_matrix: Matrix4<f32>,
     pub base_color: [f32; 3],
+    pub no_shadow: bool,
     pub uniform_buffer: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
 }
@@ -22,6 +23,17 @@ impl DrawableMesh {
         mesh: &MeshData,
         model_matrix: Matrix4<f32>,
         base_color: [f32; 3],
+    ) -> Self {
+        Self::with_shadow(device, bind_group_layout, mesh, model_matrix, base_color, false)
+    }
+
+    pub fn with_shadow(
+        device: &wgpu::Device,
+        bind_group_layout: &wgpu::BindGroupLayout,
+        mesh: &MeshData,
+        model_matrix: Matrix4<f32>,
+        base_color: [f32; 3],
+        no_shadow: bool,
     ) -> Self {
         let gpu_mesh = GpuMesh::from_mesh_data(device, mesh);
         let uniforms = Uniforms::new();
@@ -42,6 +54,7 @@ impl DrawableMesh {
             gpu_mesh,
             model_matrix,
             base_color,
+            no_shadow,
             uniform_buffer,
             bind_group,
         }
@@ -125,12 +138,13 @@ impl RenderScene {
         let building_meshes = generate_building_meshes(building);
 
         for bm in &building_meshes {
-            scene.drawables.push(DrawableMesh::new(
+            scene.drawables.push(DrawableMesh::with_shadow(
                 device,
                 bind_group_layout,
                 &bm.mesh,
                 bm.model_matrix,
                 bm.color,
+                bm.no_shadow,
             ));
         }
 

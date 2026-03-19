@@ -106,8 +106,8 @@ pub fn create_shadow_pipeline(
             depth_compare: wgpu::CompareFunction::Less,
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState {
-                constant: 2,
-                slope_scale: 2.0,
+                constant: 4,
+                slope_scale: 4.0,
                 clamp: 0.0,
             },
         }),

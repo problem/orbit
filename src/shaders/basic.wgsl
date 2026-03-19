@@ -52,9 +52,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let shadow_depth = light_ndc.z;
 
     var shadow = 1.0;
-    // Only apply shadow within the shadow map bounds
-    if shadow_uv.x >= 0.0 && shadow_uv.x <= 1.0 && shadow_uv.y >= 0.0 && shadow_uv.y <= 1.0 && shadow_depth >= 0.0 && shadow_depth <= 1.0 {
-        shadow = textureSampleCompare(shadow_map, shadow_sampler, shadow_uv, shadow_depth);
+    let is_valid = shadow_uv.x >= 0.0 && shadow_uv.x <= 1.0 && shadow_uv.y >= 0.0 && shadow_uv.y <= 1.0 && shadow_depth >= 0.0 && shadow_depth <= 1.0;
+    if is_valid {
+        let n_dot_l = max(dot(in.world_normal, sun_dir), 0.0);
+        let bias = max(0.005 * (1.0 - n_dot_l), 0.002);
+        shadow = textureSampleCompare(shadow_map, shadow_sampler, shadow_uv, shadow_depth - bias);
     }
 
     let light = ambient + diffuse * 0.8 * shadow;
