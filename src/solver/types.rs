@@ -40,6 +40,8 @@ pub struct SolvedRoom {
     pub y: f64,
     pub width: f64,
     pub depth: f64,
+    pub windows: Vec<WindowSpec>,
+    pub features: Vec<Feature>,
 }
 
 /// A complete solved floor.

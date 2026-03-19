@@ -11,9 +11,10 @@ use orbit::renderer::scene::RenderScene;
 use orbit::renderer::state::RenderState;
 
 const TUDOR_OIL: &str = r#"
-house "Simple Tudor" {
+house "Meadowbrook Tudor" {
     site {
-        footprint: 8m x 6m
+        footprint: 12m x 9m
+        orientation: north
     }
 
     style tudor {
@@ -22,7 +23,21 @@ house "Simple Tudor" {
     }
 
     floor ground {
-        room living { area: ~40sqm }
+        room entry      { area: ~6sqm, connects: [living, dining], has: front_door }
+        room living     { area: ~25sqm, aspect: 1.5, windows: south 2, has: fireplace }
+        room kitchen    { area: ~15sqm, adjacent_to: living, windows: east 1, has: island }
+        room dining     { area: ~12sqm, adjacent_to: [kitchen, living], windows: south 1 }
+        room half_bath  { area: ~4sqm, adjacent_to: kitchen }
+        room garage     { area: ~35sqm, side: west, has: garage_double }
+    }
+
+    floor upper {
+        room master_bed  { area: ~18sqm, windows: south 2, has: walk_in_closet }
+        room master_bath { area: ~8sqm, adjacent_to: master_bed, has: [shower, tub, double_vanity] }
+        room bedroom_2   { area: ~13sqm, windows: north 1, has: closet }
+        room bedroom_3   { area: ~12sqm, windows: east 1, has: closet }
+        room full_bath   { area: ~6sqm, adjacent_to: [bedroom_2, bedroom_3], has: [shower, tub] }
+        room hallway     { connects: [master_bed, bedroom_2, bedroom_3, full_bath] }
     }
 
     roof {

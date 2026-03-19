@@ -128,6 +128,8 @@ fn partition(rect: Rect, rooms: &[ResolvedRoom]) -> Vec<SolvedRoom> {
             y: rect.y,
             width: rect.width,
             depth: rect.depth,
+            windows: rooms[0].windows.clone(),
+            features: rooms[0].features.clone(),
         }];
     }
 
