@@ -9,9 +9,12 @@ struct Rect {
     depth: f64,
 }
 
-/// Solve the floor plan layout using adjacency-guided binary space partition.
+/// Solve the floor plan layout using BSP + adjacency refinement.
 ///
-/// Returns solved rooms with 2D positions in meters, origin at footprint SW corner.
+/// 1. Order rooms by adjacency (BFS from entry)
+/// 2. Recursive BSP partition (area-proportional)
+/// 3. Verify adjacency constraints
+/// 4. Refine by swapping rooms to improve adjacency score
 pub fn solve_floor_plan(
     rooms: &[ResolvedRoom],
     footprint_width: f64,
@@ -22,7 +25,6 @@ pub fn solve_floor_plan(
         return Vec::new();
     }
 
-    // Inset footprint by exterior wall thickness
     let inset = style.exterior_wall_thickness;
     let usable = Rect {
         x: inset,
@@ -31,11 +33,145 @@ pub fn solve_floor_plan(
         depth: footprint_depth - 2.0 * inset,
     };
 
-    // Order rooms for good adjacency placement
+    // Phase 1: Order rooms by adjacency graph
     let ordered = order_rooms_for_layout(rooms);
 
-    // Recursive binary space partition
-    partition(usable, &ordered)
+    // Phase 2: Initial BSP layout
+    let mut solved = partition(usable, &ordered);
+
+    // Phase 3: Score and log adjacency satisfaction
+    let (score, total) = adjacency_score(&solved, rooms);
+    log::info!(
+        "  layout: initial adjacency score: {}/{} constraints satisfied",
+        score, total
+    );
+
+    // Phase 4: Refine by swapping room positions to improve adjacency
+    if score < total {
+        let improved = refine_layout(&solved, rooms, usable);
+        let (new_score, _) = adjacency_score(&improved, rooms);
+        if new_score > score {
+            log::info!(
+                "  layout: refined adjacency score: {}/{} (improved by {})",
+                new_score, total, new_score - score
+            );
+            solved = improved;
+        }
+    }
+
+    solved
+}
+
+/// Check if two solved rooms share an edge (are geometrically adjacent).
+fn rooms_share_edge(a: &SolvedRoom, b: &SolvedRoom) -> bool {
+    let eps = 0.05;
+    let min_overlap = 0.1; // at least 10cm of shared edge
+
+    // Vertical shared edge (a's right = b's left, or vice versa)
+    let vert_a_right = ((a.x + a.width) - b.x).abs() < eps;
+    let vert_b_right = ((b.x + b.width) - a.x).abs() < eps;
+    if vert_a_right || vert_b_right {
+        // Check Y overlap
+        let overlap_start = a.y.max(b.y);
+        let overlap_end = (a.y + a.depth).min(b.y + b.depth);
+        if overlap_end - overlap_start > min_overlap {
+            return true;
+        }
+    }
+
+    // Horizontal shared edge (a's top = b's bottom, or vice versa)
+    let horiz_a_top = ((a.y + a.depth) - b.y).abs() < eps;
+    let horiz_b_top = ((b.y + b.depth) - a.y).abs() < eps;
+    if horiz_a_top || horiz_b_top {
+        // Check X overlap
+        let overlap_start = a.x.max(b.x);
+        let overlap_end = (a.x + a.width).min(b.x + b.width);
+        if overlap_end - overlap_start > min_overlap {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Score a layout: count how many adjacency/connectivity constraints are satisfied.
+fn adjacency_score(solved: &[SolvedRoom], original: &[ResolvedRoom]) -> (usize, usize) {
+    let mut satisfied = 0;
+    let mut total = 0;
+
+    for orig in original {
+        let all_required: Vec<&str> = orig
+            .adjacent_to
+            .iter()
+            .chain(orig.connects.iter())
+            .map(|s| s.as_str())
+            .collect();
+
+        for required_name in &all_required {
+            total += 1;
+            // Find both rooms in the solved layout
+            let room_a = solved.iter().find(|r| r.name == orig.name);
+            let room_b = solved.iter().find(|r| r.name.as_str() == *required_name);
+
+            if let (Some(a), Some(b)) = (room_a, room_b) {
+                if rooms_share_edge(a, b) {
+                    satisfied += 1;
+                }
+            }
+        }
+    }
+
+    // Deduplicate bidirectional constraints (A adj B + B adj A = 1 constraint)
+    // For simplicity, count each direction separately but report as-is
+    (satisfied, total)
+}
+
+/// Try to improve the layout by swapping room positions.
+/// Simple hill-climbing: try all pairs of swaps, keep the best improvement.
+fn refine_layout(
+    solved: &[SolvedRoom],
+    original: &[ResolvedRoom],
+    _usable: Rect,
+) -> Vec<SolvedRoom> {
+    let mut best = solved.to_vec();
+    let (mut best_score, total) = adjacency_score(&best, original);
+
+    // Multiple rounds of improvement
+    for _round in 0..10 {
+        let mut improved = false;
+
+        for i in 0..best.len() {
+            for j in (i + 1)..best.len() {
+                // Try swapping rooms i and j's positions
+                let mut candidate = best.clone();
+                let (xi, yi, wi, di) = (candidate[i].x, candidate[i].y, candidate[i].width, candidate[i].depth);
+                let (xj, yj, wj, dj) = (candidate[j].x, candidate[j].y, candidate[j].width, candidate[j].depth);
+
+                // Swap positions: room i gets room j's rectangle, and vice versa
+                candidate[i].x = xj;
+                candidate[i].y = yj;
+                candidate[i].width = wj;
+                candidate[i].depth = dj;
+                candidate[j].x = xi;
+                candidate[j].y = yi;
+                candidate[j].width = wi;
+                candidate[j].depth = di;
+
+                let (score, _) = adjacency_score(&candidate, original);
+                if score > best_score {
+                    best = candidate;
+                    best_score = score;
+                    improved = true;
+                }
+            }
+        }
+
+        if !improved || best_score == total {
+            break;
+        }
+    }
+
+    best
 }
 
 /// Order rooms to maximize adjacency satisfaction in BSP.
@@ -45,7 +181,6 @@ fn order_rooms_for_layout(rooms: &[ResolvedRoom]) -> Vec<ResolvedRoom> {
         return rooms.to_vec();
     }
 
-    // Find the start room: prefer entry (has front_door), else most connections
     let start = rooms
         .iter()
         .enumerate()
@@ -59,7 +194,6 @@ fn order_rooms_for_layout(rooms: &[ResolvedRoom]) -> Vec<ResolvedRoom> {
         .map(|(i, _)| i)
         .unwrap_or(0);
 
-    // BFS traversal
     let mut visited = vec![false; rooms.len()];
     let mut order = Vec::with_capacity(rooms.len());
     let mut queue = std::collections::VecDeque::new();
@@ -70,7 +204,6 @@ fn order_rooms_for_layout(rooms: &[ResolvedRoom]) -> Vec<ResolvedRoom> {
     while let Some(idx) = queue.pop_front() {
         order.push(rooms[idx].clone());
 
-        // Find neighbors by adjacency/connectivity
         let neighbors: Vec<&str> = rooms[idx]
             .adjacent_to
             .iter()
@@ -86,7 +219,6 @@ fn order_rooms_for_layout(rooms: &[ResolvedRoom]) -> Vec<ResolvedRoom> {
         }
     }
 
-    // Add any unvisited rooms (disconnected from the graph)
     for (j, room) in rooms.iter().enumerate() {
         if !visited[j] {
             order.push(room.clone());
@@ -94,7 +226,6 @@ fn order_rooms_for_layout(rooms: &[ResolvedRoom]) -> Vec<ResolvedRoom> {
     }
 
     // Move side-pinned rooms to appropriate positions
-    // Rooms pinned to west should be early (left in BSP), east should be late
     let mut pinned_west: Vec<ResolvedRoom> = Vec::new();
     let mut unpinned: Vec<ResolvedRoom> = Vec::new();
     let mut pinned_east: Vec<ResolvedRoom> = Vec::new();
@@ -137,7 +268,6 @@ fn partition(rect: Rect, rooms: &[ResolvedRoom]) -> Vec<SolvedRoom> {
         return Vec::new();
     }
 
-    // Split rooms into two groups as close to 50/50 area as possible
     let total_area: f64 = rooms.iter().map(|r| r.target_area).sum();
     let half_target = total_area / 2.0;
 
@@ -157,40 +287,17 @@ fn partition(rect: Rect, rooms: &[ResolvedRoom]) -> Vec<SolvedRoom> {
     let left_area: f64 = left_rooms.iter().map(|r| r.target_area).sum();
     let fraction = left_area / total_area;
 
-    // Split along the longer dimension
     if rect.width >= rect.depth {
-        // Vertical split (left | right)
         let split_w = rect.width * fraction;
-        let left_rect = Rect {
-            x: rect.x,
-            y: rect.y,
-            width: split_w,
-            depth: rect.depth,
-        };
-        let right_rect = Rect {
-            x: rect.x + split_w,
-            y: rect.y,
-            width: rect.width - split_w,
-            depth: rect.depth,
-        };
+        let left_rect = Rect { x: rect.x, y: rect.y, width: split_w, depth: rect.depth };
+        let right_rect = Rect { x: rect.x + split_w, y: rect.y, width: rect.width - split_w, depth: rect.depth };
         let mut result = partition(left_rect, left_rooms);
         result.extend(partition(right_rect, right_rooms));
         result
     } else {
-        // Horizontal split (bottom / top)
         let split_d = rect.depth * fraction;
-        let bottom_rect = Rect {
-            x: rect.x,
-            y: rect.y,
-            width: rect.width,
-            depth: split_d,
-        };
-        let top_rect = Rect {
-            x: rect.x,
-            y: rect.y + split_d,
-            width: rect.width,
-            depth: rect.depth - split_d,
-        };
+        let bottom_rect = Rect { x: rect.x, y: rect.y, width: rect.width, depth: split_d };
+        let top_rect = Rect { x: rect.x, y: rect.y + split_d, width: rect.width, depth: rect.depth - split_d };
         let mut result = partition(bottom_rect, left_rooms);
         result.extend(partition(top_rect, right_rooms));
         result
