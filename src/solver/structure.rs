@@ -105,7 +105,7 @@ pub fn generate_edge_meshes(building: &SolvedBuilding) -> Vec<BuildingMesh> {
     let slab_t = building.style.floor_thickness as f32;
     let ox = -fw / 2.0;
     let oy = -fd / 2.0;
-    let t = 0.03; // edge strip thickness in meters
+    let t = 0.05; // edge strip thickness in meters (~5cm visible on 8m building)
     let black = [0.0, 0.0, 0.0];
 
     for floor in &building.floors {
@@ -122,8 +122,7 @@ pub fn generate_edge_meshes(building: &SolvedBuilding) -> Vec<BuildingMesh> {
         edges.extend(box_edges(ext, fd - 2.0*ext, h, ox + ext/2.0, oy + fd/2.0, z + h/2.0, t, black));
         // East wall
         edges.extend(box_edges(ext, fd - 2.0*ext, h, ox + fw - ext/2.0, oy + fd/2.0, z + h/2.0, t, black));
-        // Ceiling
-        edges.extend(box_edges(fw, fd, slab_t, ox + fw/2.0, oy + fd/2.0, z + h + slab_t/2.0, t, black));
+        // Ceiling edges omitted — hidden under roof, would poke through as dark squares
     }
 
     edges
