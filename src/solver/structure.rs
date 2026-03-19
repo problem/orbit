@@ -423,12 +423,67 @@ pub fn generate_edge_meshes(building: &SolvedBuilding) -> Vec<BuildingMesh> {
         let h = floor.ceiling_height as f32;
         // Foundation slab
         edges.extend(box_edges(fw, fd, slab_t, ox + fw/2.0, oy + fd/2.0, z - slab_t/2.0, t, black));
-        // 4 exterior wall outlines (simplified — full wall box, openings not reflected in edges)
+        // 4 exterior wall outlines
         edges.extend(box_edges(fw, ext, h, ox + fw/2.0, oy + ext/2.0, z + h/2.0, t, black));
         edges.extend(box_edges(fw, ext, h, ox + fw/2.0, oy + fd - ext/2.0, z + h/2.0, t, black));
         edges.extend(box_edges(ext, fd - 2.0*ext, h, ox + ext/2.0, oy + fd/2.0, z + h/2.0, t, black));
         edges.extend(box_edges(ext, fd - 2.0*ext, h, ox + fw - ext/2.0, oy + fd/2.0, z + h/2.0, t, black));
     }
+
+    // Roof edges
+    if let Some(ref roof) = building.roof {
+        let top = building.floors.last().unwrap();
+        let base_z = top.elevation as f32 + top.ceiling_height as f32 + slab_t;
+        let overhang = building.style.roof_overhang as f32;
+        let pitch = roof.pitch_ratio as f32;
+
+        if roof.ridge_along_x {
+            let half_span = fd / 2.0;
+            let ridge_h = pitch * half_span;
+            let x0 = ox - overhang;
+            let x1 = ox + fw + overhang;
+            let eave_s = oy - overhang;
+            let eave_n = oy + fd + overhang;
+            let ridge_cy = oy + fd / 2.0;
+            let rz = base_z + ridge_h;
+
+            // Ridge line
+            edges.push(line_edge([x0, ridge_cy, rz], [x1, ridge_cy, rz], t, black));
+            // South eave
+            edges.push(line_edge([x0, eave_s, base_z], [x1, eave_s, base_z], t, black));
+            // North eave
+            edges.push(line_edge([x0, eave_n, base_z], [x1, eave_n, base_z], t, black));
+            // West gable slopes
+            edges.push(line_edge([x0, eave_s, base_z], [x0, ridge_cy, rz], t, black));
+            edges.push(line_edge([x0, eave_n, base_z], [x0, ridge_cy, rz], t, black));
+            // East gable slopes
+            edges.push(line_edge([x1, eave_s, base_z], [x1, ridge_cy, rz], t, black));
+            edges.push(line_edge([x1, eave_n, base_z], [x1, ridge_cy, rz], t, black));
+            // Gable base lines (bottom of gable triangles)
+            edges.push(line_edge([x0, eave_s, base_z], [x0, eave_n, base_z], t, black));
+            edges.push(line_edge([x1, eave_s, base_z], [x1, eave_n, base_z], t, black));
+        } else {
+            let half_span = fw / 2.0;
+            let ridge_h = pitch * half_span;
+            let y0 = oy - overhang;
+            let y1 = oy + fd + overhang;
+            let eave_w = ox - overhang;
+            let eave_e = ox + fw + overhang;
+            let ridge_cx = ox + fw / 2.0;
+            let rz = base_z + ridge_h;
+
+            edges.push(line_edge([ridge_cx, y0, rz], [ridge_cx, y1, rz], t, black));
+            edges.push(line_edge([eave_w, y0, base_z], [eave_w, y1, base_z], t, black));
+            edges.push(line_edge([eave_e, y0, base_z], [eave_e, y1, base_z], t, black));
+            edges.push(line_edge([eave_w, y0, base_z], [ridge_cx, y0, rz], t, black));
+            edges.push(line_edge([eave_e, y0, base_z], [ridge_cx, y0, rz], t, black));
+            edges.push(line_edge([eave_w, y1, base_z], [ridge_cx, y1, rz], t, black));
+            edges.push(line_edge([eave_e, y1, base_z], [ridge_cx, y1, rz], t, black));
+            edges.push(line_edge([eave_w, y0, base_z], [eave_e, y0, base_z], t, black));
+            edges.push(line_edge([eave_w, y1, base_z], [eave_e, y1, base_z], t, black));
+        }
+    }
+
     edges
 }
 
@@ -453,6 +508,21 @@ fn box_edges(w: f32, d: f32, h: f32, cx: f32, cy: f32, cz: f32, t: f32, color: [
         }
     }
     edges
+}
+
+/// Create a thin box edge strip between two 3D points.
+fn line_edge(a: [f32; 3], b: [f32; 3], t: f32, color: [f32; 3]) -> BuildingMesh {
+    let cx = (a[0] + b[0]) / 2.0;
+    let cy = (a[1] + b[1]) / 2.0;
+    let cz = (a[2] + b[2]) / 2.0;
+    let dx = (b[0] - a[0]).abs();
+    let dy = (b[1] - a[1]).abs();
+    let dz = (b[2] - a[2]).abs();
+    // The box dimensions: use the span along each axis, with minimum t for thin dimensions
+    let w = if dx > t { dx } else { t };
+    let d = if dy > t { dy } else { t };
+    let h = if dz > t { dz } else { t };
+    make_box(w, d, h, cx, cy, cz, color)
 }
 
 /// Create a box with w=X-width, d=Y-depth, h=Z-height centered at (cx,cy,cz).

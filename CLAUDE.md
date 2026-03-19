@@ -65,3 +65,5 @@ OIL text → Parser (src/oil/) → AST → Solver (src/solver/) → 3D Geometry 
 Every `cargo run` exports 4 screenshots from different angles. All 4 must look correct — a bug visible from only one angle is still a bug. Check `screenshots/` for the latest set.
 
 **IMPORTANT: Do NOT delete screenshots unless explicitly asked by the user.** The screenshot archive is a visual progress log. Old screenshots are valuable for comparing before/after.
+
+Screenshots are always exported in **Solid mode** (no wireframe overlay) for consistent QA baselines, regardless of the current interactive view mode. A separate wireframe screenshot is also exported. The interactive E-key toggle only affects the live window, not the exported screenshots.
