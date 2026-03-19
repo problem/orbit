@@ -109,6 +109,7 @@ struct AppState {
     window: Arc<Window>,
     render_state: RenderState,
     scene: RenderScene,
+    light_vp: nalgebra::Matrix4<f32>,
 }
 
 impl ApplicationHandler for App {
@@ -158,6 +159,11 @@ impl ApplicationHandler for App {
         render_state.camera.target = nalgebra::Point3::new(0.0, 0.0, total_height as f32 / 2.0);
         render_state.camera_controller.update_camera(&mut render_state.camera);
 
+        // Compute light view-projection for shadow mapping
+        let building_center = nalgebra::Point3::new(0.0, 0.0, total_height as f32 / 2.0);
+        let building_radius = diag / 2.0;
+        let light_vp = orbit::renderer::state::compute_light_vp(building_center, building_radius);
+
         // Export 3 screenshots from different angles for QA
         let base_num = next_screenshot_num();
         let views: &[(&str, f32, f32)] = &[
@@ -204,6 +210,7 @@ impl ApplicationHandler for App {
             window,
             render_state,
             scene,
+            light_vp,
         });
     }
 
@@ -271,7 +278,7 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
-                match state.render_state.render(&state.scene) {
+                match state.render_state.render(&state.scene, &state.light_vp) {
                     Ok(_) => {}
                     Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                         let size = state.render_state.size;

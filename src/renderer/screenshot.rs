@@ -64,11 +64,37 @@ fn render_building_to_png_opts(
 
     let texture_format = wgpu::TextureFormat::Rgba8UnormSrgb;
     let bind_group_layout = pipeline::create_bind_group_layout(&device);
+    let shadow_bind_group_layout = pipeline::create_shadow_bind_group_layout(&device);
+
     let render_pipeline = if wireframe {
-        pipeline::create_wireframe_pipeline(&device, texture_format, &bind_group_layout)
+        pipeline::create_pipeline_impl_pub(&device, texture_format, &bind_group_layout, Some(&shadow_bind_group_layout), wgpu::PolygonMode::Line)
     } else {
-        pipeline::create_render_pipeline(&device, texture_format, &bind_group_layout)
+        pipeline::create_render_pipeline_with_shadow(&device, texture_format, &bind_group_layout, &shadow_bind_group_layout)
     };
+
+    // Dummy shadow map for screenshot (no shadows in screenshots for now)
+    let shadow_tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Dummy Shadow"),
+        size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        mip_level_count: 1, sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Depth32Float,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let shadow_view = shadow_tex.create_view(&wgpu::TextureViewDescriptor::default());
+    let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        compare: Some(wgpu::CompareFunction::LessEqual),
+        ..Default::default()
+    });
+    let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Screenshot Shadow BG"),
+        layout: &shadow_bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&shadow_view) },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&shadow_sampler) },
+        ],
+    });
 
     // Create offscreen render target + depth
     let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -155,6 +181,7 @@ fn render_building_to_png_opts(
             model: bm.model_matrix.into(),
             normal_matrix: normal_mat.into(),
             base_color: [bm.color[0], bm.color[1], bm.color[2], 1.0],
+            light_view_proj: nalgebra::Matrix4::<f32>::identity().into(),
         };
 
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -211,6 +238,7 @@ fn render_building_to_png_opts(
         });
 
         render_pass.set_pipeline(&render_pipeline);
+        render_pass.set_bind_group(1, &shadow_bind_group, &[]);
         for d in &drawables {
             render_pass.set_bind_group(0, &d.bind_group, &[]);
             render_pass.set_vertex_buffer(0, d.gpu_mesh.vertex_buffer.slice(..));
