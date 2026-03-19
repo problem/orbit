@@ -110,6 +110,8 @@ struct AppState {
     render_state: RenderState,
     scene: RenderScene,
     light_vp: nalgebra::Matrix4<f32>,
+    building: orbit::solver::types::SolvedBuilding,
+    edge_thickness: f32,
 }
 
 impl ApplicationHandler for App {
@@ -142,10 +144,12 @@ impl ApplicationHandler for App {
         );
 
         // Build scene from solver output
+        let edge_thickness = 0.025;
         let scene = RenderScene::from_solved_building(
             &building,
             &render_state.device,
             &render_state.bind_group_layout,
+            edge_thickness,
         );
         log::info!("Scene: {} drawables", scene.drawables.len());
 
@@ -211,6 +215,8 @@ impl ApplicationHandler for App {
             render_state,
             scene,
             light_vp,
+            building,
+            edge_thickness,
         });
     }
 
@@ -268,6 +274,28 @@ impl ApplicationHandler for App {
                         Key::Character("e") | Key::Character("E") => {
                             state.render_state.view_mode = state.render_state.view_mode.next();
                             log::info!("View mode: {}", state.render_state.view_mode.label());
+                            state.window.request_redraw();
+                        }
+                        Key::Character("[") => {
+                            state.edge_thickness = (state.edge_thickness - 0.005).max(0.005);
+                            state.scene = RenderScene::from_solved_building(
+                                &state.building,
+                                &state.render_state.device,
+                                &state.render_state.bind_group_layout,
+                                state.edge_thickness,
+                            );
+                            log::info!("Edge thickness: {:.3}m", state.edge_thickness);
+                            state.window.request_redraw();
+                        }
+                        Key::Character("]") => {
+                            state.edge_thickness = (state.edge_thickness + 0.005).min(0.1);
+                            state.scene = RenderScene::from_solved_building(
+                                &state.building,
+                                &state.render_state.device,
+                                &state.render_state.bind_group_layout,
+                                state.edge_thickness,
+                            );
+                            log::info!("Edge thickness: {:.3}m", state.edge_thickness);
                             state.window.request_redraw();
                         }
                         Key::Named(NamedKey::Escape) => {

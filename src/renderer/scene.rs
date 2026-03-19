@@ -117,6 +117,7 @@ impl RenderScene {
         building: &SolvedBuilding,
         device: &wgpu::Device,
         bind_group_layout: &wgpu::BindGroupLayout,
+        edge_thickness: f32,
     ) -> Self {
         use crate::solver::structure::{generate_building_meshes, generate_edge_meshes};
 
@@ -133,8 +134,8 @@ impl RenderScene {
             ));
         }
 
-        // Generate black edge outlines for wireframe overlay
-        let edge_meshes = generate_edge_meshes(building);
+        // Generate black edge outlines for wireframe overlay (auto from all meshes)
+        let edge_meshes = generate_edge_meshes(building, edge_thickness);
         for em in &edge_meshes {
             scene.edge_drawables.push(DrawableMesh::new(
                 device,

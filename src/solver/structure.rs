@@ -406,75 +406,47 @@ fn generate_interior_walls(
     meshes
 }
 
-/// Generate edge outline geometry for all building boxes.
-pub fn generate_edge_meshes(building: &SolvedBuilding) -> Vec<BuildingMesh> {
-    let mut edges = Vec::new();
-    let fw = building.footprint_width as f32;
-    let fd = building.footprint_depth as f32;
-    let ext = building.style.exterior_wall_thickness as f32;
-    let slab_t = building.style.floor_thickness as f32;
-    let ox = -fw / 2.0;
-    let oy = -fd / 2.0;
-    let t = 0.05;
+/// Generate edge outlines automatically from ALL building meshes.
+/// Every box_mesh gets 12 edges. Skips the ground plane (too large).
+pub fn generate_edge_meshes(building: &SolvedBuilding, thickness: f32) -> Vec<BuildingMesh> {
+    let meshes = generate_building_meshes(building);
     let black = [0.0, 0.0, 0.0];
+    let ground_z = -(building.style.floor_thickness as f32) - 0.05;
 
-    for floor in &building.floors {
-        let z = floor.elevation as f32;
-        let h = floor.ceiling_height as f32;
-        // Foundation slab
-        edges.extend(box_edges(fw, fd, slab_t, ox + fw/2.0, oy + fd/2.0, z - slab_t/2.0, t, black));
-        // 4 exterior wall outlines
-        edges.extend(box_edges(fw, ext, h, ox + fw/2.0, oy + ext/2.0, z + h/2.0, t, black));
-        edges.extend(box_edges(fw, ext, h, ox + fw/2.0, oy + fd - ext/2.0, z + h/2.0, t, black));
-        edges.extend(box_edges(ext, fd - 2.0*ext, h, ox + ext/2.0, oy + fd/2.0, z + h/2.0, t, black));
-        edges.extend(box_edges(ext, fd - 2.0*ext, h, ox + fw - ext/2.0, oy + fd/2.0, z + h/2.0, t, black));
-    }
-
-    // Roof edges
-    if let Some(ref roof) = building.roof {
-        let top = building.floors.last().unwrap();
-        let base_z = top.elevation as f32 + top.ceiling_height as f32 + slab_t;
-        let overhang = building.style.roof_overhang as f32;
-        let pitch = roof.pitch_ratio as f32;
-
-        if roof.ridge_along_x {
-            let half_span = fd / 2.0;
-            let ridge_h = pitch * half_span;
-            let x0 = ox - overhang;
-            let x1 = ox + fw + overhang;
-            let eave_s = oy - overhang;
-            let eave_n = oy + fd + overhang;
-            let ridge_cy = oy + fd / 2.0;
-            let rz = base_z + ridge_h;
-
-            // Ridge line (axis-aligned along X)
-            edges.push(line_edge([x0, ridge_cy, rz], [x1, ridge_cy, rz], t, black));
-            // South eave (axis-aligned along X)
-            edges.push(line_edge([x0, eave_s, base_z], [x1, eave_s, base_z], t, black));
-            // North eave (axis-aligned along X)
-            edges.push(line_edge([x0, eave_n, base_z], [x1, eave_n, base_z], t, black));
-            // Gable base lines (axis-aligned along Y)
-            edges.push(line_edge([x0, eave_s, base_z], [x0, eave_n, base_z], t, black));
-            edges.push(line_edge([x1, eave_s, base_z], [x1, eave_n, base_z], t, black));
-            // Gable slope edges are diagonal — skip (line_edge only works for axis-aligned)
-        } else {
-            let half_span = fw / 2.0;
-            let ridge_h = pitch * half_span;
-            let y0 = oy - overhang;
-            let y1 = oy + fd + overhang;
-            let eave_w = ox - overhang;
-            let eave_e = ox + fw + overhang;
-            let ridge_cx = ox + fw / 2.0;
-            let rz = base_z + ridge_h;
-
-            edges.push(line_edge([ridge_cx, y0, rz], [ridge_cx, y1, rz], t, black));
-            edges.push(line_edge([eave_w, y0, base_z], [eave_w, y1, base_z], t, black));
-            edges.push(line_edge([eave_e, y0, base_z], [eave_e, y1, base_z], t, black));
-            edges.push(line_edge([eave_w, y0, base_z], [eave_e, y0, base_z], t, black));
-            edges.push(line_edge([eave_w, y1, base_z], [eave_e, y1, base_z], t, black));
+    let mut edges = Vec::new();
+    for m in &meshes {
+        // Skip ground plane (edges would be huge)
+        let pos = m.model_matrix.column(3);
+        if (pos.z - ground_z).abs() < 0.1 && m.mesh.positions.len() == 24 {
+            // Heuristic: ground plane is near ground_z and is a box
+            let aabb_w = m.mesh.positions.iter().map(|p| p[0]).fold(f32::MIN, f32::max)
+                - m.mesh.positions.iter().map(|p| p[0]).fold(f32::MAX, f32::min);
+            if aabb_w > 10.0 { continue; } // skip large ground-like meshes
         }
-    }
 
+        // Extract AABB from the mesh positions to determine box dimensions
+        if m.mesh.positions.len() == 24 {
+            // This is a box_mesh (6 faces × 4 vertices)
+            let (mut min_x, mut min_y, mut min_z) = (f32::MAX, f32::MAX, f32::MAX);
+            let (mut max_x, mut max_y, mut max_z) = (f32::MIN, f32::MIN, f32::MIN);
+            for p in &m.mesh.positions {
+                min_x = min_x.min(p[0]); max_x = max_x.max(p[0]);
+                min_y = min_y.min(p[1]); max_y = max_y.max(p[1]);
+                min_z = min_z.min(p[2]); max_z = max_z.max(p[2]);
+            }
+            let w = max_x - min_x;
+            let d = max_y - min_y;
+            let h = max_z - min_z;
+            // Skip very thin meshes (glass panes, room planes)
+            if w < 0.05 || d < 0.05 || h < 0.05 { continue; }
+            let cx = m.model_matrix[(0, 3)];
+            let cy = m.model_matrix[(1, 3)];
+            let cz = m.model_matrix[(2, 3)];
+            edges.extend(box_edges(w, d, h, cx, cy, cz, thickness, black));
+        }
+        // Quads and triangles (non-box meshes) — skip for now
+        // TODO: extract edges from arbitrary meshes
+    }
     edges
 }
 
